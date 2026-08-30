@@ -34,6 +34,35 @@ type DownloadInput = {
   onProgress?: (downloaded: number, total: number) => void;
 };
 
+async function requestFollowingRedirects(
+  request: DownloadInput["request"],
+  url: string,
+  signal: AbortSignal | undefined,
+  redirects = 0,
+): ReturnType<DownloadInput["request"]> {
+  const response = await request(url, signal);
+  if (response.status < 300 || response.status >= 400) return response;
+  if (redirects >= 5) throw new Error("speech model download exceeded redirect limit");
+
+  const location = Object.entries(response.headers).find(
+    ([name]) => name.toLowerCase() === "location",
+  )?.[1];
+  if (!location)
+    throw new Error(`speech model download redirect had no location (${response.status})`);
+
+  // Drain the redirect response before opening the next request so the
+  // underlying HTTP connection can be reused cleanly.
+  for await (const _chunk of response.body) {
+    // The redirect body is intentionally discarded.
+  }
+  return requestFollowingRedirects(
+    request,
+    new URL(location, url).toString(),
+    signal,
+    redirects + 1,
+  );
+}
+
 async function hasExpectedSize(path: string, size: number): Promise<boolean> {
   return NodeFSP.stat(path).then(
     (value) => value.size === size,
@@ -63,7 +92,7 @@ export async function downloadVerifiedModel(input: DownloadInput): Promise<strin
   }
 
   const partialPath = `${finalPath}.${process.pid}.${NodeCrypto.randomUUID()}.part`;
-  const response = await request(url, signal);
+  const response = await requestFollowingRedirects(request, url, signal);
   if (response.status < 200 || response.status >= 300) {
     throw new Error(`speech model download failed with status ${response.status}`);
   }

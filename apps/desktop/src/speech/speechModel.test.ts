@@ -83,6 +83,40 @@ describe("downloadVerifiedModel", () => {
     }
   });
 
+  it("follows Hugging Face-style redirects before verifying the model", async () => {
+    const directory = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "t3-speech-model-"));
+    directories.push(directory);
+    const bytes = Buffer.from("redirected model bytes");
+    const server = NodeHttp.createServer((request, response) => {
+      if (request.url === "/model.gguf") {
+        response.writeHead(302, { location: "/cdn/model.gguf" });
+        response.end();
+        return;
+      }
+      response.end(bytes);
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("missing test server address");
+
+    try {
+      const path = await downloadVerifiedModel({
+        directory,
+        filename: "model.gguf",
+        url: `http://127.0.0.1:${address.port}/model.gguf`,
+        size: bytes.length,
+        sha256: "f417cef9f0844ef846f40e046b95eae2dfe2a08ee542d3ff14afa06340ea96c6",
+        request,
+      });
+
+      expect(await NodeFSP.readFile(path)).toEqual(bytes);
+    } finally {
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve())),
+      );
+    }
+  });
+
   it("stops an oversized response before publishing it", async () => {
     const directory = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "t3-speech-model-"));
     directories.push(directory);
