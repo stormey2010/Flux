@@ -57,7 +57,7 @@ describe("composerSubmissionIntentForEnter", () => {
     ).toBe("background");
   });
 
-  it("keeps Mod+Enter in the foreground for an active thread", () => {
+  it("queues Mod+Enter for an active thread", () => {
     expect(
       composerSubmissionIntentForEnter({
         isMobileViewport: false,
@@ -65,7 +65,7 @@ describe("composerSubmissionIntentForEnter", () => {
         modifierKey: true,
         isDraftThread: false,
       }),
-    ).toBe("foreground");
+    ).toBe("queue");
   });
 });
 

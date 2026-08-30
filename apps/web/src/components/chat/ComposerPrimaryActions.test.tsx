@@ -275,6 +275,33 @@ describe("ComposerPrimaryActions", () => {
     expect(markup).toContain('aria-label="Queue message"');
   });
 
+  it("exposes the alternate queue action while steering is configured", () => {
+    const markup = renderToStaticMarkup(
+      createElement(ComposerPrimaryActions, {
+        compact: true,
+        pendingAction: null,
+        isRunning: true,
+        showPlanFollowUpPrompt: false,
+        promptHasText: true,
+        isSendBusy: false,
+        sendDisabledReason: null,
+        isConnecting: false,
+        isEnvironmentUnavailable: false,
+        isPreparingWorktree: false,
+        hasSendableContent: true,
+        activeTurnMessageBehavior: "steer",
+        onQueue: () => {},
+        onSteer: () => {},
+        onPreviousPendingQuestion: () => {},
+        onInterrupt: () => {},
+        onImplementPlanInNewThread: () => {},
+      }),
+    );
+
+    expect(markup).toContain('aria-label="Queue message"');
+    expect(markup).toContain("Queue message");
+  });
+
   it("keeps queue available while the previous send is being projected", () => {
     const markup = renderToStaticMarkup(
       createElement(ComposerPrimaryActions, {

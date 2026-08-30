@@ -5341,7 +5341,8 @@ function ChatViewContent(props: ChatViewProps) {
   ) => {
     e?.preventDefault();
     const canQueueWhileRunning =
-      phase === "running" && settings.activeTurnMessageBehavior === "queue";
+      phase === "running" &&
+      (submissionIntent === "queue" || settings.activeTurnMessageBehavior === "queue");
     const notifyDirectAnnotationAttached = () => {
       if (!directAnnotation) return;
       toastManager.add(
@@ -5654,7 +5655,7 @@ function ChatViewContent(props: ChatViewProps) {
     }
 
     const resolvedSubmissionIntent =
-      submissionIntent === "background" && isLocalDraftThread ? "background" : "foreground";
+      submissionIntent === "background" && isLocalDraftThread ? "background" : submissionIntent;
     if (
       shouldDockDraftHeroForSubmission({
         isDraftHeroState,
@@ -5862,45 +5863,51 @@ function ChatViewContent(props: ChatViewProps) {
       if (backgroundThreadRef) {
         beginBackgroundDraftSubmissionByRef(backgroundThreadRef);
       }
-      const startResult =
+      const shouldSteerActiveTurn =
         phase === "running" &&
         activeRunningTurnId !== null &&
-        settings.activeTurnMessageBehavior === "steer"
-          ? await steerThreadTurn({
-              environmentId,
-              input: {
-                threadId: threadIdForSend,
-                expectedTurnId: activeRunningTurnId,
-                message: {
-                  messageId: messageIdForSend,
-                  role: "user",
-                  text: outgoingMessageText,
-                  attachments: turnAttachmentsResult.value,
-                },
-                createdAt: messageCreatedAt,
+        (resolvedSubmissionIntent === "steer" ||
+          (resolvedSubmissionIntent === "foreground" &&
+            settings.activeTurnMessageBehavior === "steer"));
+      const shouldQueueAfterCurrent =
+        phase === "running" &&
+        (resolvedSubmissionIntent === "queue" ||
+          (resolvedSubmissionIntent === "foreground" &&
+            settings.activeTurnMessageBehavior === "queue"));
+      const startResult = shouldSteerActiveTurn
+        ? await steerThreadTurn({
+            environmentId,
+            input: {
+              threadId: threadIdForSend,
+              expectedTurnId: activeRunningTurnId,
+              message: {
+                messageId: messageIdForSend,
+                role: "user",
+                text: outgoingMessageText,
+                attachments: turnAttachmentsResult.value,
               },
-            })
-          : await startThreadTurn({
-              environmentId,
-              input: {
-                threadId: threadIdForSend,
-                message: {
-                  messageId: messageIdForSend,
-                  role: "user",
-                  text: outgoingMessageText,
-                  attachments: turnAttachmentsResult.value,
-                },
-                modelSelection: ctxSelectedModelSelection,
-                titleSeed: title,
-                runtimeMode,
-                interactionMode,
-                ...(settings.activeTurnMessageBehavior === "queue" && phase === "running"
-                  ? { deliveryMode: "after-current" as const }
-                  : {}),
-                ...(bootstrap ? { bootstrap } : {}),
-                createdAt: messageCreatedAt,
+              createdAt: messageCreatedAt,
+            },
+          })
+        : await startThreadTurn({
+            environmentId,
+            input: {
+              threadId: threadIdForSend,
+              message: {
+                messageId: messageIdForSend,
+                role: "user",
+                text: outgoingMessageText,
+                attachments: turnAttachmentsResult.value,
               },
-            });
+              modelSelection: ctxSelectedModelSelection,
+              titleSeed: title,
+              runtimeMode,
+              interactionMode,
+              ...(shouldQueueAfterCurrent ? { deliveryMode: "after-current" as const } : {}),
+              ...(bootstrap ? { bootstrap } : {}),
+              createdAt: messageCreatedAt,
+            },
+          });
       if (startResult._tag === "Failure") {
         if (backgroundThreadRef) {
           clearBackgroundDraftSubmissionByRef(backgroundThreadRef);

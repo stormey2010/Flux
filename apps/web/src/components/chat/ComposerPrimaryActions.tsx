@@ -32,6 +32,8 @@ interface ComposerPrimaryActionsProps {
   preserveComposerFocusOnPointerDown?: boolean;
   onPreviousPendingQuestion: () => void;
   onInterrupt: () => void;
+  onQueue?: () => void;
+  onSteer?: () => void;
   onImplementPlanInNewThread: () => void;
 }
 
@@ -73,6 +75,8 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   preserveComposerFocusOnPointerDown = false,
   onPreviousPendingQuestion,
   onInterrupt,
+  onQueue,
+  onSteer,
   onImplementPlanInNewThread,
 }: ComposerPrimaryActionsProps) {
   const pointerFocusProps = preserveComposerFocusOnPointerDown
@@ -286,9 +290,42 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
     return sendButton;
   }
 
+  const alternateAction =
+    hasSendableContent && (onQueue !== undefined || onSteer !== undefined) ? (
+      <Menu>
+        <MenuTrigger
+          render={
+            <Button
+              size="icon-sm"
+              variant="outline"
+              className="rounded-full"
+              aria-label={
+                activeTurnMessageBehavior === "queue" ? "Steer active turn" : "Queue message"
+              }
+              {...pointerFocusProps}
+            />
+          }
+        >
+          <ChevronDownIcon className="size-3.5" />
+        </MenuTrigger>
+        <MenuPopup align="end" side="top">
+          {activeTurnMessageBehavior === "queue" ? (
+            <MenuItem disabled={onSteer === undefined} onClick={onSteer}>
+              Steer active turn
+            </MenuItem>
+          ) : (
+            <MenuItem disabled={onQueue === undefined} onClick={onQueue}>
+              Queue message
+            </MenuItem>
+          )}
+        </MenuPopup>
+      </Menu>
+    ) : null;
+
   return (
     <>
       {renderStopGenerationButton(false)}
+      {alternateAction}
       {sendButton}
     </>
   );

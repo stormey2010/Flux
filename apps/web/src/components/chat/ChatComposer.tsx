@@ -466,6 +466,8 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
   preserveComposerFocusOnPointerDown?: boolean;
   onPreviousPendingQuestion: () => void;
   onInterrupt: () => void;
+  onQueue?: () => void;
+  onSteer?: () => void;
   onImplementPlanInNewThread: () => void;
   onCompactContext?: (() => void) | undefined;
   compactDisabled: boolean;
@@ -505,6 +507,8 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
         preserveComposerFocusOnPointerDown={props.preserveComposerFocusOnPointerDown ?? false}
         onPreviousPendingQuestion={props.onPreviousPendingQuestion}
         onInterrupt={props.onInterrupt}
+        {...(props.onQueue !== undefined ? { onQueue: props.onQueue } : {})}
+        {...(props.onSteer !== undefined ? { onSteer: props.onSteer } : {})}
         onImplementPlanInNewThread={props.onImplementPlanInNewThread}
       />
     </>
@@ -1397,8 +1401,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     [activePendingIsResponding, activePendingProgress, activePendingResolvedAnswers],
   );
   const collapsedComposerPrimaryActionDisabled =
-    (phase === "running" && settings.activeTurnMessageBehavior !== "queue") ||
-    (isSendBusy && !(phase === "running" && settings.activeTurnMessageBehavior === "queue")) ||
+    (isSendBusy && phase !== "running") ||
     isSendDisabled ||
     isConnecting ||
     noProviderAvailable ||
@@ -3696,6 +3699,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     preserveComposerFocusOnPointerDown={isMobileViewport}
                     onPreviousPendingQuestion={onPreviousActivePendingUserInputQuestion}
                     onInterrupt={handleInterruptPrimaryAction}
+                    onQueue={() => submitComposer(undefined, "queue")}
+                    onSteer={() => submitComposer(undefined, "steer")}
                     onImplementPlanInNewThread={handleImplementPlanInNewThreadPrimaryAction}
                     compactDisabled={
                       compactDisabled || noProviderAvailable || isSendBusy || isConnecting
