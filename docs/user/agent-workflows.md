@@ -1,6 +1,6 @@
 # Agents & Workflows
 
-T3 Code can give the coordinator a reusable catalog of specialist roles. Open
+Flux can give the coordinator a reusable catalog of specialist roles. Open
 **Settings → Agents & Workflows** to enable delegation, edit the coordinator
 instructions, and manage profiles such as Planner, Frontend, Backend, Testing,
 and Reviewer.

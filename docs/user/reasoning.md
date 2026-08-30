@@ -20,4 +20,4 @@ Claude, Codex, and OpenCode report reasoning. Cursor and Grok do not, and their 
 same as before. Thoughts appear on web and desktop. The mobile app does not show them yet.
 
 For Claude, what you read is a summary of the thinking rather than the model's raw words. Recent
-Claude Code versions do not hand out raw thinking, so T3 Code asks for the summarized form.
+Claude Code versions do not hand out raw thinking, so Flux asks for the summarized form.
