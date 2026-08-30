@@ -44,7 +44,7 @@ describe("desktop update button state", () => {
     };
     expect(hasNewerMainCommit(state)).toBe(true);
     expect(shouldShowDesktopUpdateButton(state)).toBe(true);
-    expect(resolveDesktopUpdateButtonAction(state)).toBe("download");
+    expect(resolveDesktopUpdateButtonAction(state)).toBe("none");
     expect(getDesktopUpdateButtonTooltip(state)).toContain("222222222222");
   });
 

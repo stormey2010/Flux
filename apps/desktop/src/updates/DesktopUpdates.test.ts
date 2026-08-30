@@ -355,14 +355,16 @@ describe("DesktopUpdates", () => {
         const alphaState = yield* updates.setAlphaUpdates(true);
         assert.isTrue(alphaState.alphaUpdates);
         const result = yield* updates.check("manual");
+        yield* flushCallbacks;
+        const finalState = yield* updates.getState;
 
         assert.isTrue(result.checked);
-        assert.equal(result.state.currentCommitHash, "111111111111");
-        assert.equal(result.state.mainCommitHash, "222222222222");
-        assert.equal(result.state.mainCommitMessage, "feat: update the updater");
-        assert.equal(result.state.mainCommitDate, "2026-08-30T00:00:00Z");
-        assert.equal(result.state.status, "available");
-        assert.equal(result.state.availableVersion, "master-222222222222");
+        assert.equal(finalState.currentCommitHash, "111111111111");
+        assert.equal(finalState.mainCommitHash, "222222222222");
+        assert.equal(finalState.mainCommitMessage, "feat: update the updater");
+        assert.equal(finalState.mainCommitDate, "2026-08-30T00:00:00Z");
+        assert.equal(finalState.status, "checking");
+        assert.isNull(finalState.availableVersion);
       }),
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
   });

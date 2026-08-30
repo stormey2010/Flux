@@ -43,9 +43,6 @@ export function resolveDesktopUpdateButtonAction(
   if (state.status === "available") {
     return "download";
   }
-  if (state.alphaUpdates && hasNewerMainCommit(state)) {
-    return "download";
-  }
   if (state.status === "error") {
     if (state.errorContext === "download" && state.availableVersion) {
       return "download";

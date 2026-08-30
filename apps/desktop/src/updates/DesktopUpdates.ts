@@ -414,18 +414,6 @@ export const make = Effect.gen(function* () {
       mainCommitHash: commit.hash,
       mainCommitMessage: commit.message,
       mainCommitDate: commit.date,
-      ...(state.alphaUpdates && currentCommitHash !== null && currentCommitHash !== commit.hash
-        ? {
-            status: "available" as const,
-            availableVersion: `master-${commit.hash}`,
-            downloadedVersion: null,
-            releaseNotes: [],
-            downloadPercent: null,
-            message: null,
-            errorContext: null,
-            canRetry: false,
-          }
-        : {}),
     }));
     if (currentCommitHash !== null && currentCommitHash !== commit.hash) {
       yield* logUpdaterInfo("main branch has a newer commit", {
