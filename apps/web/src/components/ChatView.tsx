@@ -1496,7 +1496,10 @@ function ChatViewContent(props: ChatViewProps) {
   const isAtEndRef = useRef(true);
   const attachmentPreviewHandoffByMessageIdRef = useRef<Record<string, string[]>>({});
   const attachmentPreviewPromotionInFlightByMessageIdRef = useRef<Record<string, true>>({});
-  const sendInFlightRef = useRef(false);
+  // Multiple messages may be queued while one command is still awaiting its
+  // acknowledgement. Keep a count so the first completion cannot re-enable
+  // actions while another submission is still in flight.
+  const sendInFlightCountRef = useRef(0);
   const feedbackUploadsInFlightRef = useRef(new Set<string>());
   const terminalUiOpenByThreadRef = useRef<Record<string, boolean>>({});
 
@@ -5360,7 +5363,7 @@ function ChatViewContent(props: ChatViewProps) {
       (isSendBusy && !canQueueWhileRunning) ||
       isConnecting ||
       threadDetailLoading ||
-      sendInFlightRef.current ||
+      (sendInFlightCountRef.current > 0 && !canQueueWhileRunning) ||
       feedbackUploadsInFlightRef.current.has(routeThreadKey)
     ) {
       notifyDirectAnnotationAttached();
@@ -5643,14 +5646,14 @@ function ChatViewContent(props: ChatViewProps) {
       return;
     }
 
-    sendInFlightRef.current = true;
+    sendInFlightCountRef.current += 1;
     if (supportsAttachmentUploads && composerImagesSnapshot.length > 0) {
       for (const image of composerImagesSnapshot) {
         startAttachmentUpload({ environmentId, image });
       }
       await awaitAttachmentUploads(composerImagesSnapshot.map((image) => image.id));
       if (getUploadedAttachments({ environmentId, images: composerImagesSnapshot }) === null) {
-        sendInFlightRef.current = false;
+        sendInFlightCountRef.current = Math.max(0, sendInFlightCountRef.current - 1);
         setThreadError(threadIdForSend, "Retry or remove failed image uploads before sending.");
         return;
       }
@@ -6024,7 +6027,7 @@ function ChatViewContent(props: ChatViewProps) {
         );
       }
     }
-    sendInFlightRef.current = false;
+    sendInFlightCountRef.current = Math.max(0, sendInFlightCountRef.current - 1);
     if (!turnStartSucceeded) {
       setDockedDraftHeroThreadKey((currentThreadKey) =>
         currentThreadKey === activeThreadKey ? null : currentThreadKey,
@@ -6223,7 +6226,7 @@ function ChatViewContent(props: ChatViewProps) {
         !isServerThread ||
         isSendBusy ||
         isConnecting ||
-        sendInFlightRef.current
+        sendInFlightCountRef.current > 0
       ) {
         return;
       }
@@ -6256,7 +6259,7 @@ function ChatViewContent(props: ChatViewProps) {
         text: trimmed,
       });
 
-      sendInFlightRef.current = true;
+      sendInFlightCountRef.current += 1;
       beginLocalDispatch({ preparingWorktree: false });
       setThreadError(threadIdForSend, null);
 
@@ -6326,7 +6329,7 @@ function ChatViewContent(props: ChatViewProps) {
 
       if (failure === null) {
         acknowledgeActiveThreadWoke();
-        sendInFlightRef.current = false;
+        sendInFlightCountRef.current = Math.max(0, sendInFlightCountRef.current - 1);
         return;
       }
 
@@ -6340,7 +6343,7 @@ function ChatViewContent(props: ChatViewProps) {
           error instanceof Error ? error.message : "Failed to send plan follow-up.",
         );
       }
-      sendInFlightRef.current = false;
+      sendInFlightCountRef.current = Math.max(0, sendInFlightCountRef.current - 1);
       resetLocalDispatch();
     },
     [
@@ -6373,7 +6376,7 @@ function ChatViewContent(props: ChatViewProps) {
       isSendBusy ||
       isConnecting ||
       activeEnvironmentUnavailable ||
-      sendInFlightRef.current
+      sendInFlightCountRef.current > 0
     ) {
       return;
     }
@@ -6407,10 +6410,10 @@ function ChatViewContent(props: ChatViewProps) {
     const nextThreadTitle = truncate(buildPlanImplementationThreadTitle(planMarkdown));
     const nextThreadModelSelection: ModelSelection = ctxSelectedModelSelection;
 
-    sendInFlightRef.current = true;
+    sendInFlightCountRef.current += 1;
     beginLocalDispatch({ preparingWorktree: false });
     const finish = () => {
-      sendInFlightRef.current = false;
+      sendInFlightCountRef.current = Math.max(0, sendInFlightCountRef.current - 1);
       resetLocalDispatch();
     };
 

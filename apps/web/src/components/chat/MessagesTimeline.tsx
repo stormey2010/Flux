@@ -1118,8 +1118,14 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
         />
       </div>
       {row.message.deliveryState === "queued" ? (
-        <div className="flex w-full max-w-[80%] items-center justify-end gap-2 pe-1 text-xs text-muted-foreground">
-          <span>Run next</span>
+        <div className="mt-1 flex w-full max-w-[80%] items-center justify-end gap-1.5 pe-1 text-xs text-muted-foreground">
+          <div className="flex items-center gap-1 rounded-lg border border-border/60 bg-muted/35 px-2 py-1">
+            <span className="font-medium text-foreground/75">Queued</span>
+            <span aria-hidden="true" className="text-muted-foreground/60">
+              ·
+            </span>
+            <span>Runs next</span>
+          </div>
           <Button
             type="button"
             size="xs"
@@ -1127,10 +1133,10 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
             disabled={!ctx.canSteerQueuedMessages}
             onClick={() => ctx.onSteerQueuedMessage(row.message.id)}
             aria-label="Steer queued message now"
-            className="gap-1 px-1.5"
+            className="gap-1 px-2"
           >
             <ZapIcon className="size-3" />
-            Steer now
+            Steer
           </Button>
           <Button
             type="button"
@@ -1138,7 +1144,7 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
             variant="ghost"
             onClick={() => ctx.onCancelQueuedMessage(row.message.id)}
             aria-label="Cancel queued message"
-            className="gap-1 px-1.5"
+            className="gap-1 px-2"
           >
             <XIcon className="size-3" />
             Cancel
