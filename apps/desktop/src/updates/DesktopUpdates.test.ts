@@ -40,6 +40,7 @@ const flushCallbacks = Effect.yieldNow;
 
 function makeHarness(options: UpdatesHarnessOptions = {}) {
   let checkCount = 0;
+  let downloadCount = 0;
   let allowDowngrade = false;
   let fullChangelog = false;
   const feedUrls: ElectronUpdater.ElectronUpdaterFeedUrl[] = [];
@@ -85,7 +86,9 @@ function makeHarness(options: UpdatesHarnessOptions = {}) {
     checkForUpdates: Effect.sync(() => {
       checkCount += 1;
     }).pipe(Effect.andThen(options.checkForUpdates ?? Effect.void)),
-    downloadUpdate: Effect.void,
+    downloadUpdate: Effect.sync(() => {
+      downloadCount += 1;
+    }),
     quitAndInstall: () => Effect.void,
     on: (eventName, listener) =>
       Effect.acquireRelease(
@@ -233,6 +236,7 @@ function makeHarness(options: UpdatesHarnessOptions = {}) {
   return {
     layer,
     checkCount: () => checkCount,
+    downloadCount: () => downloadCount,
     feedUrls: () => feedUrls,
     fullChangelog: () => fullChangelog,
     listenerCount: () =>
@@ -365,6 +369,40 @@ describe("DesktopUpdates", () => {
         assert.equal(finalState.mainCommitDate, "2026-08-30T00:00:00Z");
         assert.equal(finalState.status, "checking");
         assert.isNull(finalState.availableVersion);
+      }),
+    ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+  });
+
+  it.effect("checks for and downloads the nightly package from the alpha action", () => {
+    const harness = makeHarness({
+      env: { T3CODE_COMMIT_HASH: "1111111111111111111111111111111111111111" },
+      mainBranchCommit: {
+        sha: "2222222222222222222222222222222222222222",
+        commit: {
+          message: "feat: package the latest alpha build",
+          committer: { date: "2026-08-30T00:00:00Z" },
+        },
+      },
+    });
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const updates = yield* DesktopUpdates.DesktopUpdates;
+        yield* updates.configure;
+        yield* updates.setAlphaUpdates(true);
+        harness.emit("update-not-available");
+        yield* flushCallbacks;
+
+        const downloadFiber = yield* updates.download.pipe(Effect.forkScoped);
+        yield* flushCallbacks;
+        harness.emit("update-available", { version: "1.2.4-nightly.20260830.1" });
+        yield* flushCallbacks;
+        const result = yield* Fiber.join(downloadFiber);
+        yield* flushCallbacks;
+
+        assert.isTrue(result.accepted);
+        assert.isTrue(result.completed);
+        assert.equal(harness.downloadCount(), 1);
       }),
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
   });

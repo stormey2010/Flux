@@ -48,6 +48,9 @@ export function resolveDesktopUpdateButtonAction(
       return "download";
     }
   }
+  if (state.alphaUpdates && hasNewerMainCommit(state)) {
+    return "download";
+  }
   return "none";
 }
 

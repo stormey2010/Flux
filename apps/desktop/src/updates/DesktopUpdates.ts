@@ -9,6 +9,7 @@ import {
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
+import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -346,6 +347,9 @@ export const make = Effect.gen(function* () {
 
   const appUpdateYmlConfigRef = yield* Ref.make<Option.Option<AppUpdateYmlConfig>>(Option.none());
   const activeUpdateActionRef = yield* Ref.make<Option.Option<UpdateAction>>(Option.none());
+  const pendingAlphaDownloadCheckRef = yield* Ref.make<
+    Option.Option<Deferred.Deferred<boolean, never>>
+  >(Option.none());
   const updaterConfiguredRef = yield* Ref.make(false);
   const lastLoggedDownloadMilestoneRef = yield* Ref.make(-1);
   const updateStateRef = yield* Ref.make<DesktopUpdateState>({
@@ -373,6 +377,16 @@ export const make = Effect.gen(function* () {
         const nextState = f(state);
         return setState(nextState).pipe(Effect.as(nextState));
       }),
+    );
+
+  const resolvePendingAlphaDownloadCheck = (hasPackage: boolean): Effect.Effect<void> =>
+    Ref.modify(pendingAlphaDownloadCheckRef, (pending) => [pending, Option.none()]).pipe(
+      Effect.flatMap(
+        Option.match({
+          onNone: () => Effect.void,
+          onSome: (deferred) => Deferred.succeed(deferred, hasPackage).pipe(Effect.asVoid),
+        }),
+      ),
     );
 
   const checkMainBranch = Effect.gen(function* () {
@@ -527,6 +541,7 @@ export const make = Effect.gen(function* () {
             "desktop.updates.handleCheckForUpdatesFailure",
           )(function* (error) {
             const failedAt = yield* currentIsoTimestamp;
+            yield* resolvePendingAlphaDownloadCheck(false);
             yield* updateState((current) =>
               reduceDesktopUpdateStateOnCheckFailure(current, error.message, failedAt),
             );
@@ -546,8 +561,18 @@ export const make = Effect.gen(function* () {
   });
 
   const downloadAvailableUpdate = Effect.gen(function* () {
-    const state = yield* Ref.get(updateStateRef);
-    if (!(yield* Ref.get(updaterConfiguredRef)) || state.status !== "available") {
+    let state = yield* Ref.get(updateStateRef);
+    if (!(yield* Ref.get(updaterConfiguredRef))) {
+      return { accepted: false, completed: false };
+    }
+
+    const hasNewerAlphaCommit =
+      state.alphaUpdates === true &&
+      state.currentCommitHash !== null &&
+      state.mainCommitHash !== null &&
+      state.currentCommitHash !== state.mainCommitHash;
+    const needsAlphaPackageCheck = state.status !== "available" && hasNewerAlphaCommit;
+    if (state.status !== "available" && !needsAlphaPackageCheck) {
       return { accepted: false, completed: false };
     }
 
@@ -556,6 +581,32 @@ export const make = Effect.gen(function* () {
     }
 
     return yield* Effect.gen(function* () {
+      if (needsAlphaPackageCheck) {
+        const packageCheck = yield* Deferred.make<boolean>();
+        yield* Ref.set(pendingAlphaDownloadCheckRef, Option.some(packageCheck));
+        yield* checkForUpdates("alpha-download", "held");
+
+        const hasPackage = yield* Deferred.await(packageCheck).pipe(
+          Effect.timeoutOption(Duration.seconds(30)),
+          Effect.map(Option.getOrElse(() => false)),
+        );
+        yield* Ref.update(pendingAlphaDownloadCheckRef, (pending) =>
+          Option.isSome(pending) && pending.value === packageCheck ? Option.none() : pending,
+        );
+
+        state = yield* Ref.get(updateStateRef);
+        if (!hasPackage || state.status !== "available") {
+          yield* updateState((current) => ({
+            ...current,
+            status: "error",
+            message: "The nightly package is not available yet. Try again shortly.",
+            errorContext: "check",
+            canRetry: true,
+          }));
+          return { accepted: true, completed: false };
+        }
+      }
+
       yield* setState(reduceDesktopUpdateStateOnDownloadStart(state));
       yield* electronUpdater.setDisableDifferentialDownload(
         isArm64HostRunningIntelBuild(environment.runtimeInfo),
@@ -567,6 +618,7 @@ export const make = Effect.gen(function* () {
       Effect.catchTags({
         ElectronUpdaterDownloadUpdateError: Effect.fn("desktop.updates.handleDownloadFailure")(
           function* (error) {
+            yield* resolvePendingAlphaDownloadCheck(false);
             yield* updateState((current) =>
               reduceDesktopUpdateStateOnDownloadFailure(current, error.message),
             );
@@ -735,6 +787,7 @@ export const make = Effect.gen(function* () {
             });
             const checkedAt = yield* currentIsoTimestamp;
             yield* setState(reduceDesktopUpdateStateOnNoUpdate(state, checkedAt));
+            yield* resolvePendingAlphaDownloadCheck(false);
             yield* Ref.set(lastLoggedDownloadMilestoneRef, -1);
             return;
           }
@@ -744,6 +797,7 @@ export const make = Effect.gen(function* () {
           yield* setState(
             reduceDesktopUpdateStateOnUpdateAvailable(state, info.version, checkedAt, releaseNotes),
           );
+          yield* resolvePendingAlphaDownloadCheck(true);
           yield* Ref.set(lastLoggedDownloadMilestoneRef, -1);
           yield* logUpdaterInfo("update available", {
             version: info.version,
@@ -768,6 +822,7 @@ export const make = Effect.gen(function* () {
     const checkedAt = yield* currentIsoTimestamp;
     const state = yield* Ref.get(updateStateRef);
     yield* setState(reduceDesktopUpdateStateOnNoUpdate(state, checkedAt));
+    yield* resolvePendingAlphaDownloadCheck(false);
     yield* Ref.set(lastLoggedDownloadMilestoneRef, -1);
     yield* logUpdaterInfo("no updates available");
   }).pipe(Effect.withSpan("desktop.updates.handleUpdateNotAvailable"));
@@ -775,9 +830,13 @@ export const make = Effect.gen(function* () {
   const handleUpdaterError = Effect.fn("desktop.updates.handleUpdaterError")(function* (
     cause: unknown,
   ) {
+    yield* resolvePendingAlphaDownloadCheck(false);
     const activeAction = yield* activeUpdateAction;
     const error = new DesktopUpdaterReportedError({
-      operation: Option.getOrElse(activeAction, () => "background" as const),
+      operation: Option.match(activeAction, {
+        onNone: () => "background" as const,
+        onSome: (action) => (action === "alpha" ? "background" : action),
+      }),
       cause,
     });
     if (Option.isSome(activeAction) && activeAction.value === "install") {
