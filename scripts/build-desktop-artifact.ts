@@ -2021,10 +2021,10 @@ export const resolveGitHubPublishConfig = Effect.fn("resolveGitHubPublishConfig"
   const rawRepo = (
     Option.getOrUndefined(env.updateRepository)?.trim() ||
     Option.getOrUndefined(env.githubRepository)?.trim() ||
-    // Flux releases are hosted in the public Flux repository. Keep the
+    // Flux releases are hosted in the public Flux-V2 repository. Keep the
     // environment variables above as opt-in overrides so forks and local
     // release pipelines can publish somewhere else without changing source.
-    "stormey2010/Flux"
+    "stormey2010/Flux-V2"
   ).trim();
   if (!rawRepo) return undefined;
 

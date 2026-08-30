@@ -229,7 +229,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       assert.deepStrictEqual(config, {
         provider: "github",
         owner: "stormey2010",
-        repo: "Flux",
+        repo: "Flux-V2",
         releaseType: "release",
       });
     }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })))),

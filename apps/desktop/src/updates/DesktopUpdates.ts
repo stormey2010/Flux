@@ -45,7 +45,8 @@ import {
 
 const AUTO_UPDATE_STARTUP_DELAY = "15 seconds";
 const AUTO_UPDATE_POLL_INTERVAL = "4 minutes";
-const DEFAULT_UPDATE_REPOSITORY = "stormey2010/Flux";
+const DEFAULT_UPDATE_REPOSITORY = "stormey2010/Flux-V2";
+const DEFAULT_UPDATE_BRANCH = "master";
 const COMMIT_HASH_PATTERN = /^[0-9a-f]{7,40}$/i;
 const COMMIT_HASH_DISPLAY_LENGTH = 12;
 
@@ -231,13 +232,13 @@ function normalizeCommitHash(value: unknown): string | null {
     : null;
 }
 
-function resolveMainBranchUrl(repository: string): string | null {
+function resolveMainBranchUrl(repository: string, branch: string): string | null {
   const normalized = repository
     .trim()
     .replace(/^https:\/\/github\.com\//, "")
     .replace(/\.git$/, "");
   return /^[^/]+\/[^/]+$/.test(normalized)
-    ? `https://api.github.com/repos/${normalized}/commits/main`
+    ? `https://api.github.com/repos/${normalized}/commits/${branch}`
     : null;
 }
 
@@ -316,6 +317,7 @@ export const make = Effect.gen(function* () {
   const githubHttpClient = yield* Effect.serviceOption(HttpClient.HttpClient);
   const mainBranchUrl = resolveMainBranchUrl(
     Option.getOrElse(config.desktopUpdateRepository, () => DEFAULT_UPDATE_REPOSITORY),
+    DEFAULT_UPDATE_BRANCH,
   );
 
   const appUpdateYmlConfigRef = yield* Ref.make<Option.Option<AppUpdateYmlConfig>>(Option.none());
