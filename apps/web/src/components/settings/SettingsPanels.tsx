@@ -250,11 +250,15 @@ function AboutVersionSection() {
       if (nextChannel === selectedUpdateChannel && nextAlphaUpdates === alphaUpdates) return;
 
       setIsChangingUpdateTrack(true);
-      void Promise.all([
-        bridge.setUpdateChannel(nextChannel),
-        bridge.setAlphaUpdates(nextAlphaUpdates),
-      ])
-        .catch((error: unknown) => {
+      void (async () => {
+        try {
+          if (nextAlphaUpdates !== alphaUpdates) {
+            await bridge.setAlphaUpdates(nextAlphaUpdates);
+          }
+          if (nextChannel !== selectedUpdateChannel) {
+            await bridge.setUpdateChannel(nextChannel);
+          }
+        } catch (error) {
           toastManager.add(
             stackedThreadToast({
               type: "error",
@@ -262,8 +266,10 @@ function AboutVersionSection() {
               description: error instanceof Error ? error.message : "Update track change failed.",
             }),
           );
-        })
-        .finally(() => setIsChangingUpdateTrack(false));
+        } finally {
+          setIsChangingUpdateTrack(false);
+        }
+      })();
     },
     [alphaUpdates, selectedUpdateChannel],
   );
