@@ -30,6 +30,7 @@ const DesktopSettingsPatch = Schema.Struct({
   tailscaleServePort: Schema.optionalKey(Schema.Number),
   updateChannel: Schema.optionalKey(Schema.Literals(["latest", "nightly"])),
   updateChannelConfiguredByUser: Schema.optionalKey(Schema.Boolean),
+  alphaUpdates: Schema.optionalKey(Schema.Boolean),
   wslBackendEnabled: Schema.optionalKey(Schema.Boolean),
   wslMode: Schema.optionalKey(Schema.Literals(["local", "wsl"])),
   wslDistro: Schema.optionalKey(Schema.NullOr(Schema.String)),

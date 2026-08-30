@@ -29,6 +29,7 @@ import * as ElectronUpdater from "../electron/ElectronUpdater.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import * as IpcChannels from "../ipc/channels.ts";
 import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
+import * as LocalSourceUpdate from "./LocalSourceUpdate.ts";
 import { normalizeDesktopUpdateReleaseNotes } from "./releaseNotes.ts";
 import { resolveDefaultDesktopUpdateChannel } from "./updateChannels.ts";
 import {
@@ -257,6 +258,12 @@ function normalizeCommitHash(value: unknown): string | null {
     : null;
 }
 
+function normalizeFullCommitHash(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return COMMIT_HASH_PATTERN.test(trimmed) ? trimmed.toLowerCase() : null;
+}
+
 function resolveMainBranchUrl(repository: string, branch: string): string | null {
   const normalized = repository
     .trim()
@@ -325,6 +332,7 @@ export const make = Effect.gen(function* () {
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
   const fileSystem = yield* FileSystem.FileSystem;
   const desktopSettings = yield* DesktopAppSettings.DesktopAppSettings;
+  const localSourceUpdate = yield* Effect.serviceOption(LocalSourceUpdate.LocalSourceUpdate);
 
   const currentCommitHash = yield* Effect.gen(function* () {
     const override = Option.flatMap(environment.commitHashOverride, (value) =>
@@ -350,6 +358,10 @@ export const make = Effect.gen(function* () {
   const pendingAlphaDownloadCheckRef = yield* Ref.make<
     Option.Option<Deferred.Deferred<boolean, never>>
   >(Option.none());
+  const localArtifactRef = yield* Ref.make<
+    Option.Option<LocalSourceUpdate.LocalSourceUpdateArtifact>
+  >(Option.none());
+  const mainCommitForDownloadRef = yield* Ref.make<string | null>(null);
   const updaterConfiguredRef = yield* Ref.make(false);
   const lastLoggedDownloadMilestoneRef = yield* Ref.make(-1);
   const updateStateRef = yield* Ref.make<DesktopUpdateState>({
@@ -415,6 +427,7 @@ export const make = Effect.gen(function* () {
           if (hash === null) return null;
           return {
             hash,
+            fullHash: normalizeFullCommitHash(parsed.sha),
             message: parsed.commit.message.split("\n", 1)[0] ?? null,
             date: parsed.commit.committer?.date ?? null,
           };
@@ -429,6 +442,7 @@ export const make = Effect.gen(function* () {
       mainCommitMessage: commit.message,
       mainCommitDate: commit.date,
     }));
+    yield* Ref.set(mainCommitForDownloadRef, commit.fullHash ?? commit.hash);
     if (currentCommitHash !== null && currentCommitHash !== commit.hash) {
       yield* logUpdaterInfo("main branch has a newer commit", {
         currentCommitHash,
@@ -596,17 +610,66 @@ export const make = Effect.gen(function* () {
 
         state = yield* Ref.get(updateStateRef);
         if (!hasPackage || state.status !== "available") {
-          yield* updateState((current) => ({
-            ...current,
-            status: "error",
-            message: "The nightly package is not available yet. Try again shortly.",
-            errorContext: "check",
-            canRetry: true,
-          }));
-          return { accepted: true, completed: false };
+          const commit = yield* Ref.get(mainCommitForDownloadRef);
+          if (Option.isNone(localSourceUpdate) || commit === null) {
+            yield* updateState((current) => ({
+              ...current,
+              status: "error",
+              message:
+                "The nightly package is not available yet, and a local build cannot be started.",
+              errorContext: "check",
+              canRetry: true,
+            }));
+            return { accepted: true, completed: false };
+          }
+
+          if (environment.runtimeInfo.appArch === "other") {
+            yield* updateState((current) => ({
+              ...current,
+              status: "error",
+              message: "A local Nightly build is not supported on this application architecture.",
+              errorContext: "download",
+              canRetry: true,
+            }));
+            return { accepted: true, completed: false };
+          }
+
+          const localVersion = LocalSourceUpdate.makeLocalNightlyVersion(environment.appVersion);
+          yield* setState({
+            ...reduceDesktopUpdateStateOnDownloadStart(state),
+            message: "Building the Nightly update locally from master…",
+          });
+          const artifact = yield* localSourceUpdate.value.build({
+            repository: Option.getOrElse(
+              config.desktopUpdateRepository,
+              () => DEFAULT_UPDATE_REPOSITORY,
+            ),
+            commit,
+            version: localVersion,
+            platform:
+              environment.platform === "win32"
+                ? "win"
+                : environment.platform === "darwin"
+                  ? "mac"
+                  : "linux",
+            arch: environment.runtimeInfo.appArch,
+          });
+          yield* Ref.set(localArtifactRef, Option.some(artifact));
+          yield* setState(
+            reduceDesktopUpdateStateOnDownloadComplete(
+              yield* Ref.get(updateStateRef),
+              artifact.version,
+            ),
+          );
+          yield* logUpdaterInfo("built local Nightly installer", {
+            version: artifact.version,
+            commit,
+          });
+          return { accepted: true, completed: true };
         }
       }
 
+      yield* Ref.set(localArtifactRef, Option.none());
       yield* setState(reduceDesktopUpdateStateOnDownloadStart(state));
       yield* electronUpdater.setDisableDifferentialDownload(
         isArm64HostRunningIntelBuild(environment.runtimeInfo),
@@ -637,7 +700,7 @@ export const make = Effect.gen(function* () {
       ),
       Effect.catchCause((cause) => {
         if (Cause.hasInterruptsOnly(cause)) {
-          return Effect.failCause(cause);
+          return Effect.interrupt;
         }
         const error = new DesktopUpdateUnexpectedActionError({ action: "download", cause });
         return Effect.gen(function* () {
@@ -696,10 +759,15 @@ export const make = Effect.gen(function* () {
         { concurrency: "unbounded" },
       );
       yield* electronWindow.destroyAll;
-      yield* electronUpdater.quitAndInstall({
-        isSilent: true,
-        isForceRunAfter: true,
-      });
+      const localArtifact = yield* Ref.get(localArtifactRef);
+      if (Option.isSome(localArtifact) && Option.isSome(localSourceUpdate)) {
+        yield* localSourceUpdate.value.handoff(localArtifact.value);
+      } else {
+        yield* electronUpdater.quitAndInstall({
+          isSilent: true,
+          isForceRunAfter: true,
+        });
+      }
       return { accepted: true, completed: false };
     }).pipe(
       Effect.catchTags({
@@ -723,7 +791,7 @@ export const make = Effect.gen(function* () {
       Effect.catchCause((cause) =>
         Effect.gen(function* () {
           if (Cause.hasInterruptsOnly(cause)) {
-            return yield* Effect.failCause(cause);
+            return yield* Effect.interrupt;
           }
           yield* resetInstallAction;
           const error = new DesktopUpdateUnexpectedActionError({ action: "install", cause });
@@ -958,6 +1026,9 @@ export const make = Effect.gen(function* () {
           settings.alphaUpdates,
         ),
       );
+      if (Option.isSome(localSourceUpdate)) {
+        yield* localSourceUpdate.value.cleanupStaleBuilds;
+      }
       if (!enabled) {
         return;
       }

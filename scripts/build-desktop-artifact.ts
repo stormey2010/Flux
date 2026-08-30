@@ -679,6 +679,11 @@ const spawnAndCollectOutput = Effect.fn("spawnAndCollectOutput")(function* (
 });
 
 const resolveGitCommitHash = Effect.fn("resolveGitCommitHash")(function* (repoRoot: string) {
+  const configuredCommit = process.env.T3CODE_DESKTOP_COMMIT_HASH?.trim();
+  if (configuredCommit && /^[0-9a-f]{7,40}$/i.test(configuredCommit)) {
+    return configuredCommit.slice(0, 12).toLowerCase();
+  }
+
   const result = yield* spawnAndCollectOutput(
     ChildProcess.make("git", ["rev-parse", "--short=12", "HEAD"], {
       cwd: repoRoot,
