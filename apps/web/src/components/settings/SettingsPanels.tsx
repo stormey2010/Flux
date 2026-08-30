@@ -12,7 +12,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAtomValue } from "@effect/atom-react";
 import {
   type BackgroundActivityProfile,
-  type DesktopUpdateChannel,
   ProviderDriverKind,
   type ScopedThreadRef,
   type SidebarProjectGroupingMode,
@@ -231,51 +230,30 @@ function AboutVersionTitle() {
 
 function AboutVersionSection() {
   const updateState = useDesktopUpdateState();
-  const [isChangingUpdateChannel, setIsChangingUpdateChannel] = useState(false);
-  const [isChangingAlphaUpdates, setIsChangingAlphaUpdates] = useState(false);
+  const [isChangingUpdateTrack, setIsChangingUpdateTrack] = useState(false);
   const [isUpdateActionPending, setIsUpdateActionPending] = useState(false);
 
   const hasDesktopBridge = typeof window !== "undefined" && Boolean(window.desktopBridge);
   const selectedUpdateChannel = updateState?.channel ?? "latest";
   const selectedHostedAppChannel = hasDesktopBridge ? null : HOSTED_APP_CHANNEL;
   const alphaUpdates = updateState?.alphaUpdates === true;
+  const selectedUpdateTrack =
+    alphaUpdates || selectedUpdateChannel === "nightly" ? "nightly" : "stable";
 
-  const handleAlphaUpdatesChange = useCallback(
-    (enabled: boolean) => {
+  const handleUpdateTrackChange = useCallback(
+    (track: "stable" | "nightly") => {
       const bridge = window.desktopBridge;
-      if (!bridge?.setAlphaUpdates || enabled === alphaUpdates) return;
+      if (!bridge?.setAlphaUpdates || typeof bridge.setUpdateChannel !== "function") return;
 
-      setIsChangingAlphaUpdates(true);
-      void bridge
-        .setAlphaUpdates(enabled)
-        .catch((error: unknown) => {
-          toastManager.add(
-            stackedThreadToast({
-              type: "error",
-              title: "Could not change Alpha updates",
-              description: error instanceof Error ? error.message : "Alpha update change failed.",
-            }),
-          );
-        })
-        .finally(() => setIsChangingAlphaUpdates(false));
-    },
-    [alphaUpdates],
-  );
+      const nextChannel = track === "nightly" ? "nightly" : "latest";
+      const nextAlphaUpdates = track === "nightly";
+      if (nextChannel === selectedUpdateChannel && nextAlphaUpdates === alphaUpdates) return;
 
-  const handleUpdateChannelChange = useCallback(
-    (channel: DesktopUpdateChannel) => {
-      const bridge = window.desktopBridge;
-      if (
-        !bridge ||
-        typeof bridge.setUpdateChannel !== "function" ||
-        channel === selectedUpdateChannel
-      ) {
-        return;
-      }
-
-      setIsChangingUpdateChannel(true);
-      void bridge
-        .setUpdateChannel(channel)
+      setIsChangingUpdateTrack(true);
+      void Promise.all([
+        bridge.setUpdateChannel(nextChannel),
+        bridge.setAlphaUpdates(nextAlphaUpdates),
+      ])
         .catch((error: unknown) => {
           toastManager.add(
             stackedThreadToast({
@@ -285,11 +263,9 @@ function AboutVersionSection() {
             }),
           );
         })
-        .finally(() => {
-          setIsChangingUpdateChannel(false);
-        });
+        .finally(() => setIsChangingUpdateTrack(false));
     },
-    [selectedUpdateChannel],
+    [alphaUpdates, selectedUpdateChannel],
   );
 
   const handleButtonClick = useCallback(async () => {
@@ -421,50 +397,36 @@ function AboutVersionSection() {
         }
       />
       {hasDesktopBridge ? (
-        <>
-          <SettingsRow
-            title="Update track"
-            description="Stable follows full releases. Nightly follows the nightly desktop channel and can switch back to stable immediately."
-            control={
-              <Select
-                value={selectedUpdateChannel}
-                onValueChange={(value) => {
-                  handleUpdateChannelChange(value as DesktopUpdateChannel);
-                }}
+        <SettingsRow
+          title="Update track"
+          description="Stable receives releases only. Nightly enables Alpha updates from master and nightly releases."
+          control={
+            <Select
+              value={selectedUpdateTrack}
+              onValueChange={(value) => {
+                handleUpdateTrackChange(value as "stable" | "nightly");
+              }}
+            >
+              <SelectTrigger
+                className="w-full sm:w-40"
+                aria-label="Update track"
+                disabled={isChangingUpdateTrack}
               >
-                <SelectTrigger
-                  className="w-full sm:w-40"
-                  aria-label="Update track"
-                  disabled={isChangingUpdateChannel}
-                >
-                  <SelectValue>
-                    {selectedUpdateChannel === "nightly" ? "Nightly" : "Stable"}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectPopup align="end" alignItemWithTrigger={false}>
-                  <SelectItem hideIndicator value="latest">
-                    Stable
-                  </SelectItem>
-                  <SelectItem hideIndicator value="nightly">
-                    Nightly
-                  </SelectItem>
-                </SelectPopup>
-              </Select>
-            }
-          />
-          <SettingsRow
-            title="Alpha updates"
-            description="Treats newer packaged builds from master as updates. Leave off to receive release-only updates."
-            control={
-              <Switch
-                checked={alphaUpdates}
-                onCheckedChange={(checked) => handleAlphaUpdatesChange(Boolean(checked))}
-                disabled={isChangingAlphaUpdates}
-                aria-label="Enable Alpha updates"
-              />
-            }
-          />
-        </>
+                <SelectValue>
+                  {selectedUpdateTrack === "nightly" ? "Nightly" : "Stable"}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                <SelectItem hideIndicator value="stable">
+                  Stable
+                </SelectItem>
+                <SelectItem hideIndicator value="nightly">
+                  Nightly
+                </SelectItem>
+              </SelectPopup>
+            </Select>
+          }
+        />
       ) : selectedHostedAppChannel ? (
         <SettingsRow
           title="Update track"
