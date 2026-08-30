@@ -45,7 +45,7 @@ import {
 
 const AUTO_UPDATE_STARTUP_DELAY = "15 seconds";
 const AUTO_UPDATE_POLL_INTERVAL = "4 minutes";
-const DEFAULT_UPDATE_REPOSITORY = "stormey2010/Flux-V2";
+const DEFAULT_UPDATE_REPOSITORY = "stormey2010/Flux";
 const DEFAULT_UPDATE_BRANCH = "master";
 const COMMIT_HASH_PATTERN = /^[0-9a-f]{7,40}$/i;
 const COMMIT_HASH_DISPLAY_LENGTH = 12;

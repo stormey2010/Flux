@@ -20,7 +20,7 @@ This starts the Flux server on your machine and opens the local web app. Use
 ## Desktop App
 
 Download the latest release from
-[GitHub Releases](https://github.com/stormey2010/Flux-V2/releases), or install from a package
+[GitHub Releases](https://github.com/stormey2010/Flux/releases), or install from a package
 registry.
 
 Windows:

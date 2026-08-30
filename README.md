@@ -33,7 +33,7 @@ This will launch Flux's backend on your machine as well as the local web app to 
 
 ### Desktop app
 
-Install the latest version of the desktop app from [Flux GitHub Releases](https://github.com/stormey2010/Flux-V2/releases).
+Install the latest version of the desktop app from [Flux GitHub Releases](https://github.com/stormey2010/Flux/releases).
 
 ## Some notes
 
@@ -85,6 +85,6 @@ vp i
 
 Read [CONTRIBUTING.md](./CONTRIBUTING.md) before reporting a bug or opening a PR.
 
-Have a feature request? Start a discussion in the [Flux repository](https://github.com/stormey2010/Flux-V2/discussions).
+Have a feature request? Start a discussion in the [Flux repository](https://github.com/stormey2010/Flux/discussions).
 
 Need support? Join the [Discord](https://discord.gg/jn4EGJjrvv).
