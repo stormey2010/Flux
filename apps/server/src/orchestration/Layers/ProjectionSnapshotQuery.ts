@@ -66,6 +66,8 @@ import {
   type ProjectionSnapshotCounts,
   type ProjectionThreadCheckpointContext,
   type ProjectionSnapshotQueryShape,
+  type ProjectionThreadContentSearchHit,
+  ProjectionThreadContentSearchInputError,
 } from "../Services/ProjectionSnapshotQuery.ts";
 
 const decodeReadModel = Schema.decodeUnknownEffect(OrchestrationReadModel);
@@ -135,6 +137,24 @@ const ProjectionThreadSearchRow = Schema.Struct({
   source: OrchestrationThreadSearchSource,
   matchText: Schema.String,
   messageCreatedAt: Schema.NullOr(IsoDateTime),
+});
+const ProjectionThreadContentSearchRequest = Schema.Struct({
+  projectId: ProjectId,
+  threadId: Schema.NullOr(ThreadId),
+  pattern: Schema.String,
+  offset: Schema.Int,
+  limit: Schema.Int,
+  includeArchived: Schema.Boolean,
+});
+const ProjectionThreadContentSearchRow = Schema.Struct({
+  threadId: ThreadId,
+  projectId: ProjectId,
+  threadTitle: Schema.String,
+  archived: Schema.Number,
+  source: Schema.Literals(["title", "user", "assistant"]),
+  matchText: Schema.String,
+  matchedAt: IsoDateTime,
+  messageId: Schema.NullOr(MessageId),
 });
 const WorkspaceRootLookupInput = Schema.Struct({
   workspaceRoot: Schema.String,
@@ -239,6 +259,20 @@ function buildSearchSnippet(text: string, query: string): string {
   return `${start > 0 ? "…" : ""}${normalizedText.slice(start, end)}${
     end < normalizedText.length ? "…" : ""
   }`;
+}
+
+function buildBoundedSearchSnippet(text: string, query: string, maxChars: number): string {
+  const normalizedText = text.replace(/\s+/g, " ").trim();
+  const characters = Array.from(normalizedText);
+  if (characters.length <= maxChars) return normalizedText;
+
+  const normalizedQuery = foldAsciiCase(query.replace(/\s+/g, " ").trim());
+  const matchIndex = foldAsciiCase(normalizedText).indexOf(normalizedQuery);
+  const bodyLength = Math.max(1, maxChars - 2);
+  const idealStart = Math.max(0, matchIndex - Math.floor(bodyLength / 3));
+  const start = Math.min(idealStart, characters.length - bodyLength);
+  const body = characters.slice(start, start + bodyLength).join("");
+  return `${start > 0 ? "…" : ""}${body}${start + bodyLength < characters.length ? "…" : ""}`;
 }
 
 function computeSnapshotSequence(
@@ -893,6 +927,73 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           thread_updated_at DESC,
           thread_id ASC
         LIMIT ${limit}
+      `,
+  });
+
+  const searchThreadContentRows = SqlSchema.findAll({
+    Request: ProjectionThreadContentSearchRequest,
+    Result: ProjectionThreadContentSearchRow,
+    execute: ({ projectId, threadId, pattern, offset, limit, includeArchived }) =>
+      sql`
+        WITH candidates AS (
+          SELECT
+            threads.thread_id AS thread_id,
+            threads.project_id AS project_id,
+            threads.title AS thread_title,
+            CASE WHEN threads.archived_at IS NULL THEN 0 ELSE 1 END AS archived,
+            'title' AS source,
+            threads.title AS match_text,
+            threads.updated_at AS matched_at,
+            NULL AS message_id,
+            0 AS source_rank
+          FROM projection_threads AS threads
+          INNER JOIN projection_projects AS projects
+            ON projects.project_id = threads.project_id
+          WHERE threads.project_id = ${projectId}
+            AND (${threadId} IS NULL OR threads.thread_id = ${threadId})
+            AND threads.deleted_at IS NULL
+            AND projects.deleted_at IS NULL
+            AND (${includeArchived} = 1 OR threads.archived_at IS NULL)
+            AND threads.title LIKE ${pattern} ESCAPE '!'
+
+          UNION ALL
+
+          SELECT
+            threads.thread_id AS thread_id,
+            threads.project_id AS project_id,
+            threads.title AS thread_title,
+            CASE WHEN threads.archived_at IS NULL THEN 0 ELSE 1 END AS archived,
+            CASE messages.role WHEN 'user' THEN 'user' ELSE 'assistant' END AS source,
+            messages.text AS match_text,
+            messages.created_at AS matched_at,
+            messages.message_id AS message_id,
+            CASE messages.role WHEN 'user' THEN 1 ELSE 2 END AS source_rank
+          FROM projection_thread_messages AS messages
+          INNER JOIN projection_threads AS threads
+            ON threads.thread_id = messages.thread_id
+          INNER JOIN projection_projects AS projects
+            ON projects.project_id = threads.project_id
+          WHERE threads.project_id = ${projectId}
+            AND (${threadId} IS NULL OR threads.thread_id = ${threadId})
+            AND threads.deleted_at IS NULL
+            AND projects.deleted_at IS NULL
+            AND (${includeArchived} = 1 OR threads.archived_at IS NULL)
+            AND messages.is_streaming = 0
+            AND messages.role IN ('user', 'assistant')
+            AND messages.text LIKE ${pattern} ESCAPE '!'
+        )
+        SELECT
+          thread_id AS "threadId",
+          project_id AS "projectId",
+          thread_title AS "threadTitle",
+          archived,
+          source,
+          match_text AS "matchText",
+          matched_at AS "matchedAt",
+          message_id AS "messageId"
+        FROM candidates
+        ORDER BY matched_at DESC, source_rank ASC, thread_id ASC, message_id ASC
+        LIMIT ${limit} OFFSET ${offset}
       `,
   });
 
@@ -2401,6 +2502,81 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     };
   });
 
+  const searchThreadContent: NonNullable<ProjectionSnapshotQueryShape["searchThreadContent"]> =
+    Effect.fn("ProjectionSnapshotQuery.searchThreadContent")(function* (input) {
+      const limits = {
+        queryMinChars: 2,
+        queryMaxChars: 200,
+        pageMax: 50,
+        offsetMax: 10_000,
+        snippetMinChars: 64,
+        snippetMaxChars: 1_000,
+      } as const;
+      const fail = (field: "query" | "limit" | "offset" | "snippetChars") =>
+        new ProjectionThreadContentSearchInputError({ field });
+      if (input.query !== input.query.trim() || input.query.includes("\0")) {
+        return yield* fail("query");
+      }
+      const queryChars = Array.from(input.query).length;
+      if (queryChars < limits.queryMinChars || queryChars > limits.queryMaxChars) {
+        return yield* fail("query");
+      }
+      if (!Number.isInteger(input.limit) || input.limit < 1 || input.limit > limits.pageMax) {
+        return yield* fail("limit");
+      }
+      if (!Number.isInteger(input.offset) || input.offset < 0 || input.offset > limits.offsetMax) {
+        return yield* fail("offset");
+      }
+      if (
+        !Number.isInteger(input.snippetChars) ||
+        input.snippetChars < limits.snippetMinChars ||
+        input.snippetChars > limits.snippetMaxChars
+      ) {
+        return yield* fail("snippetChars");
+      }
+
+      const escapedQuery = escapeLikePattern(input.query);
+      const rows = yield* searchThreadContentRows({
+        projectId: input.projectId,
+        threadId: input.threadId ?? null,
+        pattern: `%${escapedQuery}%`,
+        offset: input.offset,
+        limit: input.limit + 1,
+        includeArchived: input.includeArchived,
+      }).pipe(
+        Effect.mapError(
+          toPersistenceSqlOrDecodeError(
+            "ProjectionSnapshotQuery.searchThreadContent:query",
+            "ProjectionSnapshotQuery.searchThreadContent:decodeRows",
+          ),
+        ),
+      );
+      const hasMore = rows.length > input.limit;
+      const hits: ReadonlyArray<ProjectionThreadContentSearchHit> = rows
+        .slice(0, input.limit)
+        .map((row) => {
+          const title = Array.from(row.threadTitle);
+          return {
+            threadId: row.threadId,
+            projectId: row.projectId,
+            threadTitle: title.slice(0, 500).join(""),
+            threadTitleTruncated: title.length > 500,
+            archived: row.archived === 1,
+            source: row.source,
+            origin: "legacy" as const,
+            snippet: buildBoundedSearchSnippet(row.matchText, input.query, input.snippetChars),
+            snippetTruncated: Array.from(row.matchText).length > input.snippetChars,
+            matchedAt: row.matchedAt,
+            messageId: row.messageId,
+          };
+        });
+      return {
+        hits,
+        hasMore,
+        nextOffset: hasMore ? input.offset + input.limit : null,
+      };
+    });
+
   const getActiveProjectByWorkspaceRoot: ProjectionSnapshotQueryShape["getActiveProjectByWorkspaceRoot"] =
     (workspaceRoot) =>
       getActiveProjectRowByWorkspaceRoot({ workspaceRoot }).pipe(
@@ -2948,6 +3124,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     getShellSnapshot,
     getArchivedShellSnapshot,
     searchThreads,
+    searchThreadContent,
     getSnapshotSequence,
     getCounts,
     getActiveProjectByWorkspaceRoot,

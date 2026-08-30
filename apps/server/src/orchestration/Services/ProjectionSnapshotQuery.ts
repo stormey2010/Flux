@@ -19,12 +19,14 @@ import type {
   OrchestrationThreadDetailSnapshot,
   OrchestrationThreadDetailWindow,
   OrchestrationThreadShell,
+  MessageId,
   ProjectId,
   ThreadId,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import type * as Option from "effect/Option";
 import type * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
 
 import type { ProjectionRepositoryError } from "../../persistence/Errors.ts";
 
@@ -52,6 +54,51 @@ export interface ProjectionFullThreadDiffContext {
   readonly worktreePath: string | null;
   readonly latestCheckpointTurnCount: number;
   readonly toCheckpointRef: CheckpointRef | null;
+}
+
+export const PROJECTION_THREAD_CONTENT_SEARCH_LIMITS = {
+  queryMinChars: 2,
+  queryMaxChars: 200,
+  pageMax: 50,
+  offsetMax: 10_000,
+  snippetMinChars: 64,
+  snippetMaxChars: 1_000,
+  titleMaxChars: 500,
+} as const;
+
+export class ProjectionThreadContentSearchInputError extends Schema.TaggedErrorClass<ProjectionThreadContentSearchInputError>()(
+  "ProjectionThreadContentSearchInputError",
+  { field: Schema.Literals(["query", "limit", "offset", "snippetChars"]) },
+) {}
+
+export interface ProjectionThreadContentSearchInput {
+  readonly projectId: ProjectId;
+  readonly threadId?: ThreadId;
+  readonly query: string;
+  readonly includeArchived: boolean;
+  readonly offset: number;
+  readonly limit: number;
+  readonly snippetChars: number;
+}
+
+export interface ProjectionThreadContentSearchHit {
+  readonly threadId: ThreadId;
+  readonly projectId: ProjectId;
+  readonly threadTitle: string;
+  readonly threadTitleTruncated: boolean;
+  readonly archived: boolean;
+  readonly source: "title" | "user" | "assistant";
+  readonly origin: "legacy";
+  readonly snippet: string;
+  readonly snippetTruncated: boolean;
+  readonly matchedAt: string;
+  readonly messageId: MessageId | null;
+}
+
+export interface ProjectionThreadContentSearchPage {
+  readonly hits: ReadonlyArray<ProjectionThreadContentSearchHit>;
+  readonly hasMore: boolean;
+  readonly nextOffset: number | null;
 }
 
 /**
@@ -104,6 +151,13 @@ export interface ProjectionSnapshotQueryShape {
   readonly searchThreads: (
     input: OrchestrationSearchThreadsInput,
   ) => Effect.Effect<OrchestrationSearchThreadsResult, ProjectionRepositoryError>;
+
+  readonly searchThreadContent?: (
+    input: ProjectionThreadContentSearchInput,
+  ) => Effect.Effect<
+    ProjectionThreadContentSearchPage,
+    ProjectionRepositoryError | ProjectionThreadContentSearchInputError
+  >;
 
   /**
    * Read the latest projection snapshot sequence without hydrating read-model
