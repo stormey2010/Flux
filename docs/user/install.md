@@ -96,4 +96,5 @@ For multi-account setups, see [Codex](./providers-codex.md) and [Claude](./provi
 - [Permission modes](./permission-modes.md): how much Flux asks before acting
 - [Remote access](./remote-access.md): connect from a phone, tablet, or another desktop
 - [Keeping Flux in sync](./updating.md): client and server version skew
+- [Notifications](./desktop-notifications.md): choose which agent events notify you
 - [Running in the background](./background-service.md): Linux background service

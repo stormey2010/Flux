@@ -12,6 +12,12 @@ import {
 } from "./methods/cloudflareTunnel.ts";
 import { getClientSettings, setClientSettings } from "./methods/clientSettings.ts";
 import {
+  dismissAllDesktopNotifications,
+  dismissDesktopNotification,
+  showDesktopNotification,
+  showDesktopNotificationTest,
+} from "./methods/notifications.ts";
+import {
   clearConnectionCatalog,
   getConnectionCatalog,
   setConnectionCatalog,
@@ -71,6 +77,10 @@ export const installDesktopIpcHandlers = Effect.fn("desktop.ipc.installHandlers"
 
   yield* ipc.handle(getClientSettings);
   yield* ipc.handle(setClientSettings);
+  yield* ipc.handle(showDesktopNotification);
+  yield* ipc.handle(dismissDesktopNotification);
+  yield* ipc.handle(dismissAllDesktopNotifications);
+  yield* ipc.handle(showDesktopNotificationTest);
   yield* ipc.handle(getConnectionCatalog);
   yield* ipc.handle(setConnectionCatalog);
   yield* ipc.handle(clearConnectionCatalog);
