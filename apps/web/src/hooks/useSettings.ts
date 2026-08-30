@@ -40,6 +40,7 @@ import { useAtomCommand } from "~/state/use-atom-command";
 import { useTheme } from "./useTheme";
 
 const CLIENT_SETTINGS_PERSISTENCE_ERROR_SCOPE = "[CLIENT_SETTINGS]";
+const ACTIVE_TURN_QUEUE_DEFAULT_MIGRATION_KEY = "flux-active-turn-queue-default-v1";
 
 type UnifiedSettingsPatch = ServerSettingsPatch & ClientSettingsPatch;
 
@@ -79,6 +80,22 @@ function setClientSettingsHydrated(nextHydrated: boolean): void {
   emitClientSettingsHydrationChange();
 }
 
+function hasAcknowledgedActiveTurnBehaviorPreference(): boolean {
+  try {
+    return window.localStorage.getItem(ACTIVE_TURN_QUEUE_DEFAULT_MIGRATION_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function acknowledgeActiveTurnBehaviorPreference(): void {
+  try {
+    window.localStorage.setItem(ACTIVE_TURN_QUEUE_DEFAULT_MIGRATION_KEY, "1");
+  } catch {
+    // Settings persistence still works when browser storage is unavailable.
+  }
+}
+
 function subscribeClientSettings(listener: () => void): () => void {
   clientSettingsListeners.add(listener);
   void hydrateClientSettings();
@@ -115,7 +132,28 @@ async function hydrateClientSettings(): Promise<void> {
         return;
       }
       if (persistedSettings) {
-        replaceClientSettingsSnapshot({ ...DEFAULT_CLIENT_SETTINGS, ...persistedSettings });
+        const migrateSteerDefault =
+          persistedSettings.activeTurnMessageBehavior === "steer" &&
+          !hasAcknowledgedActiveTurnBehaviorPreference();
+        const hydratedSettings: ClientSettings = migrateSteerDefault
+          ? {
+              ...DEFAULT_CLIENT_SETTINGS,
+              ...persistedSettings,
+              activeTurnMessageBehavior: "queue",
+            }
+          : { ...DEFAULT_CLIENT_SETTINGS, ...persistedSettings };
+        replaceClientSettingsSnapshot(hydratedSettings);
+        if (migrateSteerDefault) {
+          acknowledgeActiveTurnBehaviorPreference();
+          void ensureLocalApi()
+            .persistence.setClientSettings(hydratedSettings)
+            .catch((error) => {
+              console.error(`${CLIENT_SETTINGS_PERSISTENCE_ERROR_SCOPE} migration failed`, {
+                operation: "migrate-active-turn-message-behavior",
+                ...safeErrorLogAttributes(error),
+              });
+            });
+        }
       }
     } catch (error) {
       console.error(`${CLIENT_SETTINGS_PERSISTENCE_ERROR_SCOPE} hydrate failed`, {
@@ -329,6 +367,9 @@ function useUpdateSettingsTarget(environmentId: EnvironmentId | null) {
         }
       }
       if (Object.keys(clientPatch).length > 0) {
+        if (Object.hasOwn(clientPatch, "activeTurnMessageBehavior")) {
+          acknowledgeActiveTurnBehaviorPreference();
+        }
         persistClientSettings({
           ...getClientSettingsSnapshot(),
           ...clientPatch,
@@ -356,6 +397,9 @@ export function useUpdateClientSettings() {
     (update: ClientSettingsPatch | ((current: ClientSettings) => ClientSettingsPatch)) => {
       const current = getClientSettingsSnapshot();
       const patch = typeof update === "function" ? update(current) : update;
+      if (Object.hasOwn(patch, "activeTurnMessageBehavior")) {
+        acknowledgeActiveTurnBehaviorPreference();
+      }
       persistClientSettings({
         ...current,
         ...patch,

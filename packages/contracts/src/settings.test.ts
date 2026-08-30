@@ -22,13 +22,13 @@ const encodeServerSettings = Schema.encodeSync(ServerSettings);
 const decodeClaudeSettings = Schema.decodeUnknownSync(ClaudeSettings);
 
 describe("ClientSettings active-turn message behavior", () => {
-  it("defaults to steering and accepts queue mode", () => {
+  it("defaults to queueing and accepts steering mode", () => {
     expect(decodeClientSettings({}).activeTurnMessageBehavior).toBe(
       DEFAULT_ACTIVE_TURN_MESSAGE_BEHAVIOR,
     );
     expect(
-      decodeClientSettingsPatch({ activeTurnMessageBehavior: "queue" }).activeTurnMessageBehavior,
-    ).toBe("queue");
+      decodeClientSettingsPatch({ activeTurnMessageBehavior: "steer" }).activeTurnMessageBehavior,
+    ).toBe("steer");
   });
 
   it("rejects unsupported active-turn behavior", () => {

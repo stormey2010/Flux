@@ -1,6 +1,9 @@
 import { memo, type PointerEventHandler } from "react";
 import { ChevronDownIcon, ChevronLeftIcon } from "lucide-react";
-import type { ActiveTurnMessageBehavior } from "@t3tools/contracts/settings";
+import {
+  DEFAULT_ACTIVE_TURN_MESSAGE_BEHAVIOR,
+  type ActiveTurnMessageBehavior,
+} from "@t3tools/contracts/settings";
 import { useEnvironmentIdentificationMode } from "~/hooks/useSettings";
 import { cn } from "~/lib/utils";
 import { StageBackdropButtonArt, useSidebarStageBackdropVariant } from "../SidebarStageBackdrop";
@@ -71,7 +74,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   isEnvironmentUnavailable,
   isPreparingWorktree,
   hasSendableContent,
-  activeTurnMessageBehavior = "steer",
+  activeTurnMessageBehavior = DEFAULT_ACTIVE_TURN_MESSAGE_BEHAVIOR,
   preserveComposerFocusOnPointerDown = false,
   onPreviousPendingQuestion,
   onInterrupt,

@@ -126,7 +126,10 @@ export const DEFAULT_ENVIRONMENT_IDENTIFICATION_MODE: EnvironmentIdentificationM
 
 export const ActiveTurnMessageBehavior = Schema.Literals(["steer", "queue"]);
 export type ActiveTurnMessageBehavior = typeof ActiveTurnMessageBehavior.Type;
-export const DEFAULT_ACTIVE_TURN_MESSAGE_BEHAVIOR: ActiveTurnMessageBehavior = "steer";
+// Sending while an agent is working should be safe by default: preserve the
+// current turn and run the new message after it. Steering remains available as
+// an explicit action from the composer menu or by selecting it in settings.
+export const DEFAULT_ACTIVE_TURN_MESSAGE_BEHAVIOR: ActiveTurnMessageBehavior = "queue";
 export const DesktopNotificationEventSettingsSchema = Schema.Struct({
   approval: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   input: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),

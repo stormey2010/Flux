@@ -244,11 +244,11 @@ describe("ComposerPrimaryActions", () => {
     expect(markup).toContain("bg-message-action text-message-action-foreground");
   });
 
-  it("renders steer alongside stop while running", () => {
+  it("renders queue alongside stop while running by default", () => {
     const markup = renderRunningActions(true);
 
     expect(markup).toContain('aria-label="Stop generation"');
-    expect(markup).toContain('aria-label="Steer active turn"');
+    expect(markup).toContain('aria-label="Queue message"');
   });
 
   it("renders queue as the active-turn action when configured", () => {
@@ -327,11 +327,11 @@ describe("ComposerPrimaryActions", () => {
     expect(markup).toContain('aria-label="Queue message"');
   });
 
-  it("renders send alongside stop while running", () => {
+  it("renders queue alongside stop while running by default", () => {
     const markup = renderRunningActions(true);
 
     expect(markup).toContain('aria-label="Stop generation"');
-    expect(markup).toContain('aria-label="Steer active turn"');
+    expect(markup).toContain('aria-label="Queue message"');
     expect(markup).toContain('type="submit"');
     expect(markup).toContain("size-9 sm:size-8");
   });

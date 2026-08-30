@@ -1332,9 +1332,14 @@ const make = Effect.gen(function* () {
     const status = thread.session?.status;
     if (status === "starting" || status === "running" || status === "error") return;
     const createdAt = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
+    // The original command id belongs to the durable queue request and has
+    // already been acknowledged by the orchestration engine. Reusing it here
+    // would make the deferred dispatch look like a duplicate command, so the
+    // engine would skip the queued-turn-dispatched/turn-start events entirely.
+    const dispatchCommandId = yield* serverCommandId("queued-turn-dispatch");
     yield* orchestrationEngine.dispatch({
       type: "thread.queued-turn.dispatch",
-      commandId: next.commandId,
+      commandId: dispatchCommandId,
       threadId: next.threadId,
       messageId: next.messageId,
       ...(next.modelSelection !== null ? { modelSelection: next.modelSelection } : {}),
