@@ -1299,6 +1299,9 @@ function ChatViewContent(props: ChatViewProps) {
   });
   const startThreadTurn = useAtomCommand(threadEnvironment.startTurn, { reportFailure: false });
   const steerThreadTurn = useAtomCommand(threadEnvironment.steerTurn, { reportFailure: false });
+  const steerQueuedTurn = useAtomCommand(threadEnvironment.steerQueuedTurn, {
+    reportFailure: false,
+  });
   const cancelQueuedTurn = useAtomCommand(threadEnvironment.cancelQueuedTurn, {
     reportFailure: false,
   });
@@ -5341,8 +5344,7 @@ function ChatViewContent(props: ChatViewProps) {
   ) => {
     e?.preventDefault();
     const canQueueWhileRunning =
-      phase === "running" &&
-      (submissionIntent === "queue" || settings.activeTurnMessageBehavior === "queue");
+      phase === "running" && (submissionIntent === "foreground" || submissionIntent === "queue");
     const notifyDirectAnnotationAttached = () => {
       if (!directAnnotation) return;
       toastManager.add(
@@ -5864,16 +5866,11 @@ function ChatViewContent(props: ChatViewProps) {
         beginBackgroundDraftSubmissionByRef(backgroundThreadRef);
       }
       const shouldSteerActiveTurn =
-        phase === "running" &&
-        activeRunningTurnId !== null &&
-        (resolvedSubmissionIntent === "steer" ||
-          (resolvedSubmissionIntent === "foreground" &&
-            settings.activeTurnMessageBehavior === "steer"));
+        phase === "running" && activeRunningTurnId !== null && resolvedSubmissionIntent === "steer";
       const shouldQueueAfterCurrent =
         phase === "running" &&
-        (resolvedSubmissionIntent === "queue" ||
-          (resolvedSubmissionIntent === "foreground" &&
-            settings.activeTurnMessageBehavior === "queue"));
+        !shouldSteerActiveTurn &&
+        (resolvedSubmissionIntent === "foreground" || resolvedSubmissionIntent === "queue");
       const startResult = shouldSteerActiveTurn
         ? await steerThreadTurn({
             environmentId,
@@ -6702,6 +6699,20 @@ function ChatViewContent(props: ChatViewProps) {
     },
     [activeThread, cancelQueuedTurn, environmentId],
   );
+  const onSteerQueuedMessage = useCallback(
+    (messageId: MessageId) => {
+      if (!activeThread || activeRunningTurnId === null) return;
+      void steerQueuedTurn({
+        environmentId,
+        input: {
+          threadId: activeThread.id,
+          messageId,
+          expectedTurnId: activeRunningTurnId,
+        },
+      });
+    },
+    [activeRunningTurnId, activeThread, environmentId, steerQueuedTurn],
+  );
 
   // Empty state: no active thread
   if (!activeThread) {
@@ -6972,6 +6983,8 @@ function ChatViewContent(props: ChatViewProps) {
                 revertTurnCountByUserMessageId={revertTurnCountByUserMessageId}
                 onRevertUserMessage={onRevertUserMessage}
                 onCancelQueuedMessage={onCancelQueuedMessage}
+                onSteerQueuedMessage={onSteerQueuedMessage}
+                canSteerQueuedMessages={activeRunningTurnId !== null}
                 isRevertingCheckpoint={isRevertingCheckpoint}
                 onImageExpand={onExpandTimelineImage}
                 markdownCwd={gitCwd ?? undefined}

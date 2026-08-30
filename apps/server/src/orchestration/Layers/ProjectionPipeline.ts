@@ -1043,6 +1043,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           return;
 
         case "thread.queued-turn-dispatched":
+        case "thread.queued-turn-steer-requested":
           yield* projectionThreadMessageRepository.setDeliveryState({
             messageId: event.payload.messageId,
             deliveryState: null,
@@ -1126,6 +1127,11 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           yield* projectionQueuedTurnRepository.markHandoff({ messageId: event.payload.messageId });
           return;
         case "thread.queued-turn-cancelled":
+          yield* projectionQueuedTurnRepository.deleteByMessageId({
+            messageId: event.payload.messageId,
+          });
+          return;
+        case "thread.queued-turn-steer-requested":
           yield* projectionQueuedTurnRepository.deleteByMessageId({
             messageId: event.payload.messageId,
           });

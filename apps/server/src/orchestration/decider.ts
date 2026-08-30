@@ -1128,6 +1128,39 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "thread.queued-turn.steer": {
+      const thread = yield* requireThread({ readModel, command, threadId: command.threadId });
+      const message = thread.messages.find((entry) => entry.id === command.messageId);
+      if (message?.role !== "user" || message.deliveryState !== "queued") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Queued user message '${command.messageId}' does not exist on thread '${command.threadId}'.`,
+        });
+      }
+      const session = thread.session;
+      if (session?.status !== "running" || session.activeTurnId !== command.expectedTurnId) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Thread '${command.threadId}' is no longer running the expected turn '${command.expectedTurnId}'.`,
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.queued-turn-steer-requested",
+        payload: {
+          threadId: command.threadId,
+          messageId: command.messageId,
+          expectedTurnId: command.expectedTurnId,
+          createdAt: command.createdAt,
+        },
+      };
+    }
+
     case "thread.queued-turn.dispatch": {
       const thread = yield* requireThread({ readModel, command, threadId: command.threadId });
       const message = thread.messages.find((entry) => entry.id === command.messageId);

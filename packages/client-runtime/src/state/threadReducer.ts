@@ -284,6 +284,7 @@ export function applyThreadDetailEvent(
       };
 
     case "thread.queued-turn-dispatched":
+    case "thread.queued-turn-steer-requested":
       return {
         kind: "updated",
         thread: {

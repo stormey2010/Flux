@@ -176,4 +176,26 @@ it.layer(NodeServices.layer)("queued and steered turns", (it) => {
       expect(events.map((event) => event.type)).toEqual(["thread.queued-turn-cancelled"]);
     }),
   );
+
+  it.effect("promotes a queued message to a steer request without duplicating it", () =>
+    Effect.gen(function* () {
+      const result = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.queued-turn.steer",
+          commandId: CommandId.make("cmd-steer-queued-turn"),
+          threadId: THREAD_ID,
+          messageId: MESSAGE_ID,
+          expectedTurnId: TURN_ID,
+          createdAt: NOW,
+        },
+        readModel: makeReadModel({ queued: true, running: true }),
+      });
+      const events = Array.isArray(result) ? result : [result];
+      expect(events.map((event) => event.type)).toEqual(["thread.queued-turn-steer-requested"]);
+      expect(events[0]?.payload).toMatchObject({
+        messageId: MESSAGE_ID,
+        expectedTurnId: TURN_ID,
+      });
+    }),
+  );
 });

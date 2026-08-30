@@ -16,6 +16,7 @@ import {
 const EMPTY_AGENT_PANEL_MODEL = emptyAgentPanelModel();
 const NOOP_OPEN_AGENTS = () => {};
 const NOOP_CANCEL_QUEUED_MESSAGE = (_messageId: MessageId) => {};
+const NOOP_STEER_QUEUED_MESSAGE = (_messageId: MessageId) => {};
 import { resolveChatListAnchoredEndSpace } from "@t3tools/shared/chatList";
 import {
   createContext,
@@ -148,6 +149,8 @@ interface TimelineRowSharedState {
   activeThreadEnvironmentId: EnvironmentId;
   onRevertUserMessage: (messageId: MessageId) => void;
   onCancelQueuedMessage: (messageId: MessageId) => void;
+  onSteerQueuedMessage: (messageId: MessageId) => void;
+  canSteerQueuedMessages: boolean;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
   onToggleTurnFold: (turnId: TurnId) => void;
@@ -232,6 +235,8 @@ interface MessagesTimelineProps {
   revertTurnCountByUserMessageId: Map<MessageId, number>;
   onRevertUserMessage: (messageId: MessageId) => void;
   onCancelQueuedMessage?: (messageId: MessageId) => void;
+  onSteerQueuedMessage?: (messageId: MessageId) => void;
+  canSteerQueuedMessages?: boolean;
   isRevertingCheckpoint: boolean;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   activeThreadEnvironmentId: EnvironmentId;
@@ -278,6 +283,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   revertTurnCountByUserMessageId,
   onRevertUserMessage,
   onCancelQueuedMessage = NOOP_CANCEL_QUEUED_MESSAGE,
+  onSteerQueuedMessage = NOOP_STEER_QUEUED_MESSAGE,
+  canSteerQueuedMessages = false,
   isRevertingCheckpoint,
   onImageExpand,
   activeThreadEnvironmentId,
@@ -550,6 +557,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       activeThreadEnvironmentId,
       onRevertUserMessage,
       onCancelQueuedMessage,
+      onSteerQueuedMessage,
+      canSteerQueuedMessages,
       onImageExpand,
       onOpenTurnDiff,
       onToggleTurnFold,
@@ -569,6 +578,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       activeThreadEnvironmentId,
       onRevertUserMessage,
       onCancelQueuedMessage,
+      onSteerQueuedMessage,
+      canSteerQueuedMessages,
       onImageExpand,
       onOpenTurnDiff,
       onToggleTurnFold,
@@ -1109,6 +1120,18 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
       {row.message.deliveryState === "queued" ? (
         <div className="flex w-full max-w-[80%] items-center justify-end gap-2 pe-1 text-xs text-muted-foreground">
           <span>Run next</span>
+          <Button
+            type="button"
+            size="xs"
+            variant="ghost"
+            disabled={!ctx.canSteerQueuedMessages}
+            onClick={() => ctx.onSteerQueuedMessage(row.message.id)}
+            aria-label="Steer queued message now"
+            className="gap-1 px-1.5"
+          >
+            <ZapIcon className="size-3" />
+            Steer now
+          </Button>
           <Button
             type="button"
             size="xs"

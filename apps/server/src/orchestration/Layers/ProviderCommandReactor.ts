@@ -63,6 +63,7 @@ type ProviderIntentEvent = Extract<
       | "thread.turn-queued"
       | "thread.turn-start-requested"
       | "thread.turn-steer-requested"
+      | "thread.queued-turn-steer-requested"
       | "thread.turn-interrupt-requested"
       | "thread.approval-response-requested"
       | "thread.user-input-response-requested"
@@ -1237,7 +1238,10 @@ const make = Effect.gen(function* () {
   });
 
   const processTurnSteerRequested = Effect.fn("processTurnSteerRequested")(function* (
-    event: Extract<ProviderIntentEvent, { type: "thread.turn-steer-requested" }>,
+    event: Extract<
+      ProviderIntentEvent,
+      { type: "thread.turn-steer-requested" | "thread.queued-turn-steer-requested" }
+    >,
   ) {
     const thread = yield* resolveThread(event.payload.threadId);
     if (!thread) return;
@@ -1608,6 +1612,7 @@ const make = Effect.gen(function* () {
         yield* processTurnStartRequested(event);
         return;
       case "thread.turn-steer-requested":
+      case "thread.queued-turn-steer-requested":
         yield* processTurnSteerRequested(event);
         return;
       case "thread.turn-interrupt-requested":
@@ -1668,6 +1673,7 @@ const make = Effect.gen(function* () {
         event.type === "thread.turn-queued" ||
         event.type === "thread.turn-start-requested" ||
         event.type === "thread.turn-steer-requested" ||
+        event.type === "thread.queued-turn-steer-requested" ||
         event.type === "thread.turn-interrupt-requested" ||
         event.type === "thread.approval-response-requested" ||
         event.type === "thread.user-input-response-requested" ||

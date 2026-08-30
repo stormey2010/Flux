@@ -589,7 +589,8 @@ export function projectEvent(
       });
     }
 
-    case "thread.queued-turn-dispatched": {
+    case "thread.queued-turn-dispatched":
+    case "thread.queued-turn-steer-requested": {
       const thread = nextBase.threads.find((entry) => entry.id === event.payload.threadId);
       if (!thread) return Effect.succeed(nextBase);
       return Effect.succeed({

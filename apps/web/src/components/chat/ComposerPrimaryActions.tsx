@@ -74,7 +74,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   isEnvironmentUnavailable,
   isPreparingWorktree,
   hasSendableContent,
-  activeTurnMessageBehavior = DEFAULT_ACTIVE_TURN_MESSAGE_BEHAVIOR,
+  activeTurnMessageBehavior: _activeTurnMessageBehavior = DEFAULT_ACTIVE_TURN_MESSAGE_BEHAVIOR,
   preserveComposerFocusOnPointerDown = false,
   onPreviousPendingQuestion,
   onInterrupt,
@@ -87,7 +87,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
     : undefined;
   const environmentIdentificationMode = useEnvironmentIdentificationMode();
   const isSendDisabled = sendDisabledReason !== null;
-  const canQueueWhileRunning = isRunning && activeTurnMessageBehavior === "queue";
+  const canQueueWhileRunning = isRunning;
   const isSendBusyForCurrentAction = isSendBusy && !canQueueWhileRunning;
   const stageBackdropVariant = useSidebarStageBackdropVariant(
     environmentIdentificationMode === "artwork",
@@ -262,9 +262,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
                 : isSendBusyForCurrentAction
                   ? "Sending"
                   : isRunning
-                    ? activeTurnMessageBehavior === "queue"
-                      ? "Queue message"
-                      : "Steer active turn"
+                    ? "Queue message"
                     : "Send message"
       }
     >
@@ -293,42 +291,9 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
     return sendButton;
   }
 
-  const alternateAction =
-    hasSendableContent && (onQueue !== undefined || onSteer !== undefined) ? (
-      <Menu>
-        <MenuTrigger
-          render={
-            <Button
-              size="icon-sm"
-              variant="outline"
-              className="rounded-full"
-              aria-label={
-                activeTurnMessageBehavior === "queue" ? "Steer active turn" : "Queue message"
-              }
-              {...pointerFocusProps}
-            />
-          }
-        >
-          <ChevronDownIcon className="size-3.5" />
-        </MenuTrigger>
-        <MenuPopup align="end" side="top">
-          {activeTurnMessageBehavior === "queue" ? (
-            <MenuItem disabled={onSteer === undefined} onClick={onSteer}>
-              Steer active turn
-            </MenuItem>
-          ) : (
-            <MenuItem disabled={onQueue === undefined} onClick={onQueue}>
-              Queue message
-            </MenuItem>
-          )}
-        </MenuPopup>
-      </Menu>
-    ) : null;
-
   return (
     <>
       {renderStopGenerationButton(false)}
-      {alternateAction}
       {sendButton}
     </>
   );

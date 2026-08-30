@@ -48,6 +48,7 @@ export type SetThreadInteractionModeInput = CommandInput<"thread.interaction-mod
 export type StartThreadTurnInput = CommandInput<"thread.turn.start">;
 export type SteerThreadTurnInput = CommandInput<"thread.turn.steer">;
 export type CancelQueuedThreadTurnInput = CommandInput<"thread.queued-turn.cancel">;
+export type SteerQueuedThreadTurnInput = CommandInput<"thread.queued-turn.steer">;
 export type InterruptThreadTurnInput = CommandInput<"thread.turn.interrupt">;
 export type RespondToThreadApprovalInput = CommandInput<"thread.approval.respond">;
 export type RespondToThreadUserInputInput = CommandInput<"thread.user-input.respond">;
@@ -307,6 +308,17 @@ export const cancelQueuedThreadTurn: (input: CancelQueuedThreadTurnInput) => Com
     return yield* dispatch({
       ...input,
       type: "thread.queued-turn.cancel",
+      commandId: metadata.commandId,
+      createdAt: metadata.createdAt,
+    });
+  });
+
+export const steerQueuedThreadTurn: (input: SteerQueuedThreadTurnInput) => CommandEffect =
+  Effect.fn("EnvironmentCommands.steerQueuedThreadTurn")(function* (input) {
+    const metadata = yield* timestampedCommandMetadata(input);
+    return yield* dispatch({
+      ...input,
+      type: "thread.queued-turn.steer",
       commandId: metadata.commandId,
       createdAt: metadata.createdAt,
     });
