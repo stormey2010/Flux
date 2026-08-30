@@ -10,7 +10,7 @@ import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
-import { HttpClient, HttpClientResponse } from "effect/unstable/http";
+import { HttpClient } from "effect/unstable/http";
 import * as NodePath from "node:path";
 
 import * as DesktopAppIdentity from "../app/DesktopAppIdentity.ts";
@@ -97,10 +97,7 @@ export const make = Effect.gen(function* () {
   const runPromise = Effect.runPromiseWith(context);
 
   const requestModel = async (url: string, signal?: AbortSignal) => {
-    const response = await runPromise(
-      httpClient.get(url).pipe(Effect.flatMap(HttpClientResponse.filterStatusOk)),
-      signal ? { signal } : undefined,
-    );
+    const response = await runPromise(httpClient.get(url), signal ? { signal } : undefined);
     return {
       status: response.status,
       headers: response.headers,

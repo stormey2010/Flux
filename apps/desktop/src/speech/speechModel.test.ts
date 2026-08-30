@@ -10,7 +10,10 @@ import { downloadVerifiedModel } from "./speechModel.ts";
 const directories: string[] = [];
 
 async function request(url: string, signal?: AbortSignal) {
-  const response = await fetch(url, { ...(signal ? { signal } : {}) });
+  const response = await fetch(url, {
+    redirect: "manual",
+    ...(signal ? { signal } : {}),
+  });
   if (!response.body) throw new Error("test response has no body");
   return {
     status: response.status,
