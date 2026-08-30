@@ -15,6 +15,7 @@ import {
 
 const EMPTY_AGENT_PANEL_MODEL = emptyAgentPanelModel();
 const NOOP_OPEN_AGENTS = () => {};
+const NOOP_CANCEL_QUEUED_MESSAGE = (_messageId: MessageId) => {};
 import { resolveChatListAnchoredEndSpace } from "@t3tools/shared/chatList";
 import {
   createContext,
@@ -146,6 +147,7 @@ interface TimelineRowSharedState {
   skills: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
   activeThreadEnvironmentId: EnvironmentId;
   onRevertUserMessage: (messageId: MessageId) => void;
+  onCancelQueuedMessage: (messageId: MessageId) => void;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
   onToggleTurnFold: (turnId: TurnId) => void;
@@ -229,6 +231,7 @@ interface MessagesTimelineProps {
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
   revertTurnCountByUserMessageId: Map<MessageId, number>;
   onRevertUserMessage: (messageId: MessageId) => void;
+  onCancelQueuedMessage?: (messageId: MessageId) => void;
   isRevertingCheckpoint: boolean;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   activeThreadEnvironmentId: EnvironmentId;
@@ -274,6 +277,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   onOpenTurnDiff,
   revertTurnCountByUserMessageId,
   onRevertUserMessage,
+  onCancelQueuedMessage = NOOP_CANCEL_QUEUED_MESSAGE,
   isRevertingCheckpoint,
   onImageExpand,
   activeThreadEnvironmentId,
@@ -545,6 +549,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       skills,
       activeThreadEnvironmentId,
       onRevertUserMessage,
+      onCancelQueuedMessage,
       onImageExpand,
       onOpenTurnDiff,
       onToggleTurnFold,
@@ -563,6 +568,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       skills,
       activeThreadEnvironmentId,
       onRevertUserMessage,
+      onCancelQueuedMessage,
       onImageExpand,
       onOpenTurnDiff,
       onToggleTurnFold,
@@ -1100,6 +1106,22 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
           markdownCwd={ctx.markdownCwd}
         />
       </div>
+      {row.message.deliveryState === "queued" ? (
+        <div className="flex w-full max-w-[80%] items-center justify-end gap-2 pe-1 text-xs text-muted-foreground">
+          <span>Run next</span>
+          <Button
+            type="button"
+            size="xs"
+            variant="ghost"
+            onClick={() => ctx.onCancelQueuedMessage(row.message.id)}
+            aria-label="Cancel queued message"
+            className="gap-1 px-1.5"
+          >
+            <XIcon className="size-3" />
+            Cancel
+          </Button>
+        </div>
+      ) : null}
       <div className="flex w-full max-w-[80%] items-center justify-end pe-1 text-xs tabular-nums opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover:opacity-100">
         <div className="flex shrink-0 items-center gap-2">
           <Tooltip>

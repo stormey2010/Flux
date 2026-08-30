@@ -5,6 +5,7 @@ import type {
   OrchestrationThreadShell,
   ProviderInteractionMode,
   RuntimeMode,
+  ThreadTurnDeliveryMode,
   ServerConfig as T3ServerConfig,
 } from "@t3tools/contracts";
 import {
@@ -39,6 +40,7 @@ import { armAgentAwarenessLiveActivityForLocalWork } from "../agent-awareness/re
 import { scopedThreadKey } from "../../lib/scopedEntities";
 
 import { AppText as Text } from "../../components/AppText";
+import { SymbolView } from "../../components/AppSymbol";
 import { ComposerAttachmentStrip } from "../../components/ComposerAttachmentStrip";
 import { GlassSurface } from "../../components/GlassSurface";
 import {
@@ -107,6 +109,7 @@ export interface ThreadComposerProps {
   readonly selectedThread: OrchestrationThreadShell;
   readonly serverConfig: T3ServerConfig | null;
   readonly queueCount: number;
+  readonly deliveryMode: ThreadTurnDeliveryMode;
   readonly environmentId: EnvironmentId;
   readonly projectCwd: string | null;
   readonly editorRef?: RefObject<ComposerEditorHandle | null>;
@@ -115,6 +118,7 @@ export interface ThreadComposerProps {
   readonly onNativePasteImages: (uris: ReadonlyArray<string>) => Promise<void>;
   readonly onRemoveDraftImage: (imageId: string) => void;
   readonly onStopThread: () => void;
+  readonly onDeliveryModeChange: (mode: ThreadTurnDeliveryMode) => void;
   readonly onSendMessage: () => Promise<MessageId | null>;
   readonly onUpdateModelSelection: (modelSelection: ModelSelection) => void;
   readonly onUpdateRuntimeMode: (runtimeMode: RuntimeMode) => void;
@@ -886,6 +890,23 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
                   maxWidth={152}
                   onPress={openSettings}
                 />
+                {showStopAction && props.selectedThread.session?.status === "running" ? (
+                  <ComposerInlineControl
+                    accessibilityLabel={
+                      props.deliveryMode === "steer" ? "Send with Run next" : "Send with Steer"
+                    }
+                    iconNode={
+                      <SymbolView name="arrow.up.right.circle" size={16} type="monochrome" />
+                    }
+                    label={props.deliveryMode === "steer" ? "Steer" : "Run next"}
+                    maxWidth={96}
+                    onPress={() =>
+                      props.onDeliveryModeChange(
+                        props.deliveryMode === "steer" ? "after-current" : "steer",
+                      )
+                    }
+                  />
+                ) : null}
                 {showStopAction ? (
                   <ComposerToolbarButton
                     accessibilityLabel="Stop"

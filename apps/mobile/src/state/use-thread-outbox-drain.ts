@@ -87,6 +87,7 @@ function settingsCommandId(message: QueuedThreadMessage, setting: string): Comma
 
 export function useThreadOutboxDrain(): void {
   const startTurn = useAtomCommand(threadEnvironment.startTurn, { reportFailure: false });
+  const steerTurn = useAtomCommand(threadEnvironment.steerTurn, { reportFailure: false });
   const updateThreadMetadata = useAtomCommand(threadEnvironment.updateMetadata, {
     reportFailure: false,
   });
@@ -217,29 +218,48 @@ export function useThreadOutboxDrain(): void {
         }
       }
 
-      const deliveryResult = await startTurn({
-        environmentId: queuedMessage.environmentId,
-        input: {
-          commandId: queuedMessage.commandId,
-          threadId: queuedMessage.threadId,
-          message: {
-            messageId: queuedMessage.messageId,
-            role: "user",
-            text: queuedMessage.text,
-            attachments: toUploadChatImageAttachments(queuedMessage.attachments),
-          },
-          modelSelection: settings.modelSelection,
-          runtimeMode: settings.runtimeMode,
-          interactionMode: settings.interactionMode,
-          createdAt: queuedMessage.createdAt,
-        },
-      });
+      const message = {
+        messageId: queuedMessage.messageId,
+        role: "user" as const,
+        text: queuedMessage.text,
+        attachments: toUploadChatImageAttachments(queuedMessage.attachments),
+      };
+      const deliveryResult =
+        queuedMessage.deliveryMode === "steer" &&
+        thread.session?.status === "running" &&
+        thread.session.activeTurnId !== null
+          ? await steerTurn({
+              environmentId: queuedMessage.environmentId,
+              input: {
+                commandId: queuedMessage.commandId,
+                threadId: queuedMessage.threadId,
+                expectedTurnId: thread.session.activeTurnId,
+                message,
+                createdAt: queuedMessage.createdAt,
+              },
+            })
+          : await startTurn({
+              environmentId: queuedMessage.environmentId,
+              input: {
+                commandId: queuedMessage.commandId,
+                threadId: queuedMessage.threadId,
+                message,
+                modelSelection: settings.modelSelection,
+                runtimeMode: settings.runtimeMode,
+                interactionMode: settings.interactionMode,
+                ...(queuedMessage.deliveryMode === "after-current"
+                  ? { deliveryMode: "after-current" as const }
+                  : {}),
+                createdAt: queuedMessage.createdAt,
+              },
+            });
       return completeDelivery(deliveryResult);
     },
     [
       makeDeliveryHelpers,
       setThreadInteractionMode,
       setThreadRuntimeMode,
+      steerTurn,
       startTurn,
       updateThreadMetadata,
     ],
@@ -275,6 +295,7 @@ export function useThreadOutboxDrain(): void {
           worktreePath: creation.worktreePath,
           startFromOrigin: creation.startFromOrigin ?? false,
           worktreeBranchName: buildTemporaryWorktreeBranchName(randomHex),
+          deliveryMode: queuedMessage.deliveryMode,
         }),
       });
       return completeDelivery(deliveryResult);

@@ -11,6 +11,7 @@ import type {
   OrchestrationThreadShell,
   ProviderApprovalDecision,
   ProviderInteractionMode,
+  ThreadTurnDeliveryMode,
   RuntimeMode,
   ServerConfig as T3ServerConfig,
   ThreadId,
@@ -106,6 +107,8 @@ export interface ThreadDetailScreenProps {
   readonly projectWorkspaceRoot: string | null;
   readonly threadCwd: string | null;
   readonly selectedThreadQueueCount: number;
+  readonly onCancelQueuedMessage: (messageId: MessageId) => void;
+  readonly deliveryMode: ThreadTurnDeliveryMode;
   readonly serverConfig: T3ServerConfig | null;
   readonly layoutVariant?: LayoutVariant;
   readonly usesAutomaticContentInsets?: boolean;
@@ -116,6 +119,7 @@ export interface ThreadDetailScreenProps {
   readonly onNativePasteImages: (uris: ReadonlyArray<string>) => Promise<void>;
   readonly onRemoveDraftImage: (imageId: string) => void;
   readonly onStopThread: () => void;
+  readonly onDeliveryModeChange: (mode: ThreadTurnDeliveryMode) => void;
   readonly onSendMessage: () => Promise<MessageId | null>;
   readonly onReconnectEnvironment: () => void;
   readonly onUpdateThreadModelSelection: (modelSelection: ModelSelection) => void;
@@ -620,6 +624,7 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
             freeze={freeze}
             anchorMessageId={anchorMessageId}
             submittedMessageId={submittedMessageId}
+            onCancelQueuedMessage={props.onCancelQueuedMessage}
             contentInsetEndAdjustment={combinedContentInsetEndAdjustment}
             contentTopInset={0}
             contentBottomInset={estimatedOverlayHeight}
@@ -752,6 +757,7 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
                 selectedThread={props.selectedThread}
                 serverConfig={props.serverConfig}
                 queueCount={props.selectedThreadQueueCount}
+                deliveryMode={props.deliveryMode}
                 environmentId={props.environmentId}
                 projectCwd={props.projectWorkspaceRoot}
                 bottomInset={composerBottomInset}
@@ -760,6 +766,7 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
                 onNativePasteImages={props.onNativePasteImages}
                 onRemoveDraftImage={props.onRemoveDraftImage}
                 onStopThread={props.onStopThread}
+                onDeliveryModeChange={props.onDeliveryModeChange}
                 onSendMessage={handleSendMessage}
                 onReconnectEnvironment={props.onReconnectEnvironment}
                 onUpdateModelSelection={props.onUpdateThreadModelSelection}

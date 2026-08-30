@@ -543,6 +543,16 @@ function GeneralSettingsSection() {
         value={autoSettleOnMerge}
         onValueChange={(value) => savePreferences({ autoSettleOnMerge: value })}
       />
+      <SettingsSwitchRow
+        icon="arrow.up.right.circle"
+        label="Steer active turns"
+        subtitle="When off, messages wait on the server and run next."
+        value={
+          !AsyncResult.isSuccess(preferencesResult) ||
+          preferencesResult.value.steerActiveTurns !== false
+        }
+        onValueChange={(value) => savePreferences({ steerActiveTurns: value })}
+      />
       <SettingsRow icon="chart.bar.xaxis" label="Usage" target="SettingsUsage" />
     </SettingsSection>
   );

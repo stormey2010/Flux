@@ -6,6 +6,7 @@ import {
   type ProjectId,
   type ProviderInteractionMode,
   type RuntimeMode,
+  type ThreadTurnDeliveryMode,
 } from "@t3tools/contracts";
 
 import { toUploadChatImageAttachments, type DraftComposerImageAttachment } from "./composerImages";
@@ -38,6 +39,7 @@ export interface ProjectThreadStartTurnSpec {
   readonly startFromOrigin: boolean;
   /** Generated temp branch for worktree mode; unused for local mode. */
   readonly worktreeBranchName: string;
+  readonly deliveryMode?: ThreadTurnDeliveryMode;
 }
 
 /**
@@ -61,6 +63,7 @@ export function buildProjectThreadStartTurnInput(spec: ProjectThreadStartTurnSpe
     titleSeed: title,
     runtimeMode: spec.runtimeMode,
     interactionMode: spec.interactionMode,
+    ...(spec.deliveryMode !== undefined ? { deliveryMode: spec.deliveryMode } : {}),
     bootstrap: {
       createThread: {
         projectId: spec.projectId,

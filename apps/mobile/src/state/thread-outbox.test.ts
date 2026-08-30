@@ -78,6 +78,18 @@ describe("thread outbox", () => {
     ).toThrow();
   });
 
+  it("persists the selected active-turn delivery mode", () => {
+    const message = queuedMessage({
+      messageId: "message-steer",
+      createdAt: "2026-06-08T10:00:01.000Z",
+    });
+
+    expect(
+      decodeQueuedThreadMessage(encodeQueuedThreadMessage({ ...message, deliveryMode: "steer" }))
+        .deliveryMode,
+    ).toBe("steer");
+  });
+
   it("persists the exact selector snapshot while remaining compatible with v1 messages", () => {
     const legacyMessage = queuedMessage({
       messageId: "message-1",

@@ -14,6 +14,7 @@ import type {
   ProviderUserInputAnswers,
   ProviderRuntimeEvent,
   ProviderSendTurnInput,
+  ProviderSteerTurnInput,
   ProviderSession,
   ProviderSessionStartInput,
   ProviderUploadFeedbackInput,
@@ -63,6 +64,11 @@ export interface ProviderAdapterShape<TError> {
    */
   readonly sendTurn: (
     input: ProviderSendTurnInput,
+  ) => Effect.Effect<ProviderTurnStartResult, TError>;
+
+  /** Provider-native active-turn steering, when supported. */
+  readonly steerTurn?: (
+    input: ProviderSteerTurnInput,
   ) => Effect.Effect<ProviderTurnStartResult, TError>;
 
   /**

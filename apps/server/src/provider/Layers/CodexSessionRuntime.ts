@@ -2,6 +2,7 @@ import {
   ApprovalRequestId,
   DEFAULT_MODEL,
   EventId,
+  MessageId,
   ProviderDriverKind,
   ProviderItemId,
   type ProviderInstanceId,
@@ -41,6 +42,7 @@ import { codexSessionAppServerArgs } from "./codexLaunchArgs.ts";
 import { expandHomePath } from "../../pathExpansion.ts";
 import { buildCodexDeveloperInstructions } from "../CodexDeveloperInstructions.ts";
 const decodeV2TurnStartResponse = Schema.decodeUnknownEffect(EffectCodexSchema.V2TurnStartResponse);
+const decodeV2TurnSteerResponse = Schema.decodeUnknownEffect(EffectCodexSchema.V2TurnSteerResponse);
 
 const PROVIDER = ProviderDriverKind.make("codex");
 
@@ -193,6 +195,12 @@ export interface CodexSessionRuntimeShape {
   readonly sendTurn: (
     input: CodexSessionRuntimeSendTurnInput,
   ) => Effect.Effect<ProviderTurnStartResult, CodexSessionRuntimeError>;
+  readonly steerTurn?: (input: {
+    readonly expectedTurnId: TurnId;
+    readonly clientUserMessageId?: MessageId;
+    readonly input?: string;
+    readonly attachments?: ReadonlyArray<EffectCodexSchema.V2TurnSteerParams__UserInput>;
+  }) => Effect.Effect<ProviderTurnStartResult, CodexSessionRuntimeError>;
   readonly interruptTurn: (turnId?: TurnId) => Effect.Effect<void, CodexSessionRuntimeError>;
   readonly readThread: Effect.Effect<CodexThreadSnapshot, CodexSessionRuntimeError>;
   readonly rollbackThread: (
@@ -2161,6 +2169,41 @@ export const makeCodexSessionRuntime = (
             ...(resumedProviderThreadId
               ? { resumeCursor: { threadId: resumedProviderThreadId } }
               : {}),
+          } satisfies ProviderTurnStartResult;
+        }),
+      steerTurn: (input) =>
+        Effect.gen(function* () {
+          const providerThreadId = yield* readProviderThreadId;
+          const steerInput = [
+            ...(input.input !== undefined ? [{ type: "text" as const, text: input.input }] : []),
+            ...(input.attachments ?? []),
+          ];
+          const rawResponse = yield* client.raw.request("turn/steer", {
+            threadId: providerThreadId,
+            expectedTurnId: input.expectedTurnId,
+            ...(input.clientUserMessageId !== undefined
+              ? { clientUserMessageId: input.clientUserMessageId }
+              : {}),
+            input: steerInput,
+          });
+          const response = yield* decodeV2TurnSteerResponse(rawResponse).pipe(
+            Effect.mapError((error) =>
+              CodexErrors.CodexAppServerProtocolParseError.fromSchemaError(
+                "decode-response-payload",
+                error,
+                { method: "turn/steer" },
+              ),
+            ),
+          );
+          const turnId = TurnId.make(response.turnId);
+          yield* updateSession(sessionRef, (session) => ({
+            ...session,
+            status: "running",
+            activeTurnId: turnId,
+          }));
+          return {
+            threadId: options.threadId,
+            turnId,
           } satisfies ProviderTurnStartResult;
         }),
       interruptTurn: (turnId) =>

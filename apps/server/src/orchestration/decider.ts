@@ -106,7 +106,11 @@ function hasOpenBlockingRequest(thread: {
  */
 function threadHasQueuedTurnStart(
   thread: {
-    readonly messages: ReadonlyArray<{ readonly role: string; readonly createdAt: string }>;
+    readonly messages: ReadonlyArray<{
+      readonly role: string;
+      readonly createdAt: string;
+      readonly deliveryState?: "queued" | undefined;
+    }>;
     readonly latestTurn: {
       readonly requestedAt: string;
       readonly startedAt: string | null;
@@ -116,6 +120,9 @@ function threadHasQueuedTurnStart(
   },
   occurredAt: string,
 ): boolean {
+  if (thread.messages.some((message) => message.deliveryState === "queued")) {
+    return true;
+  }
   const latestUserMessageAtMs = thread.messages.reduce(
     (latest, message) =>
       message.role === "user" ? Math.max(latest, Date.parse(message.createdAt)) : latest,
@@ -976,7 +983,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           updatedAt: command.createdAt,
         },
       };
-      const turnStartRequestedEvent: Omit<OrchestrationEvent, "sequence"> = {
+      const turnIntentEvent: Omit<OrchestrationEvent, "sequence"> = {
         ...(yield* withEventBase({
           aggregateKind: "thread",
           aggregateId: command.threadId,
@@ -984,7 +991,10 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           commandId: command.commandId,
         })),
         causationEventId: userMessageEvent.eventId,
-        type: "thread.turn-start-requested",
+        type:
+          command.deliveryMode === "after-current"
+            ? "thread.turn-queued"
+            : "thread.turn-start-requested",
         payload: {
           threadId: command.threadId,
           messageId: command.message.messageId,
@@ -1036,7 +1046,138 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           },
         });
       }
-      return [...lifecycleResetEvents, userMessageEvent, turnStartRequestedEvent];
+      return [...lifecycleResetEvents, userMessageEvent, turnIntentEvent];
+    }
+
+    case "thread.turn.steer": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      const session = thread.session;
+      if (session?.status !== "running" || session.activeTurnId !== command.expectedTurnId) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Thread '${command.threadId}' is no longer running the expected turn '${command.expectedTurnId}'.`,
+        });
+      }
+      const userMessageEvent: Omit<OrchestrationEvent, "sequence"> = {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.message-sent",
+        payload: {
+          threadId: command.threadId,
+          messageId: command.message.messageId,
+          role: "user",
+          text: command.message.text,
+          attachments: command.message.attachments,
+          turnId: null,
+          streaming: false,
+          createdAt: command.createdAt,
+          updatedAt: command.createdAt,
+        },
+      };
+      return [
+        userMessageEvent,
+        {
+          ...(yield* withEventBase({
+            aggregateKind: "thread",
+            aggregateId: command.threadId,
+            occurredAt: command.createdAt,
+            commandId: command.commandId,
+          })),
+          causationEventId: userMessageEvent.eventId,
+          type: "thread.turn-steer-requested",
+          payload: {
+            threadId: command.threadId,
+            messageId: command.message.messageId,
+            expectedTurnId: command.expectedTurnId,
+            createdAt: command.createdAt,
+          },
+        },
+      ];
+    }
+
+    case "thread.queued-turn.cancel": {
+      const thread = yield* requireThread({ readModel, command, threadId: command.threadId });
+      const message = thread.messages.find((entry) => entry.id === command.messageId);
+      if (message?.role !== "user" || message.deliveryState !== "queued") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Queued user message '${command.messageId}' does not exist on thread '${command.threadId}'.`,
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.queued-turn-cancelled",
+        payload: {
+          threadId: command.threadId,
+          messageId: command.messageId,
+          cancelledAt: command.createdAt,
+        },
+      };
+    }
+
+    case "thread.queued-turn.dispatch": {
+      const thread = yield* requireThread({ readModel, command, threadId: command.threadId });
+      const message = thread.messages.find((entry) => entry.id === command.messageId);
+      if (message?.role !== "user" || message.deliveryState !== "queued") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Queued user message '${command.messageId}' is no longer waiting on thread '${command.threadId}'.`,
+        });
+      }
+      const dispatchedEvent: Omit<OrchestrationEvent, "sequence"> = {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.queued-turn-dispatched",
+        payload: {
+          threadId: command.threadId,
+          messageId: command.messageId,
+          dispatchedAt: command.createdAt,
+        },
+      };
+      return [
+        dispatchedEvent,
+        {
+          ...(yield* withEventBase({
+            aggregateKind: "thread",
+            aggregateId: command.threadId,
+            occurredAt: command.createdAt,
+            commandId: command.commandId,
+          })),
+          causationEventId: dispatchedEvent.eventId,
+          type: "thread.turn-start-requested",
+          payload: {
+            threadId: command.threadId,
+            messageId: command.messageId,
+            ...(command.modelSelection !== undefined
+              ? { modelSelection: command.modelSelection }
+              : {}),
+            ...(command.titleSeed !== undefined ? { titleSeed: command.titleSeed } : {}),
+            runtimeMode: command.runtimeMode,
+            interactionMode: command.interactionMode,
+            ...(command.sourceProposedPlan !== undefined
+              ? { sourceProposedPlan: command.sourceProposedPlan }
+              : {}),
+            createdAt: command.queuedAt,
+          },
+        },
+      ];
     }
 
     case "thread.turn.interrupt": {

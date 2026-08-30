@@ -979,6 +979,75 @@ describe("applyThreadDetailEvent", () => {
     });
   });
 
+  describe("queued turn lifecycle", () => {
+    const queuedMessage = {
+      id: MessageId.make("queued-message"),
+      role: "user" as const,
+      text: "Run this next",
+      turnId: null,
+      streaming: false,
+      createdAt: "2026-04-01T14:00:00.000Z",
+      updatedAt: "2026-04-01T14:00:00.000Z",
+    };
+
+    it("marks, delivers, and cancels queued messages", () => {
+      const messageThread = { ...baseThread, messages: [queuedMessage] };
+      const queued = applyThreadDetailEvent(messageThread, {
+        ...baseEventFields,
+        sequence: 16,
+        occurredAt: "2026-04-01T14:01:00.000Z",
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-1"),
+        type: "thread.turn-queued",
+        payload: {
+          threadId: ThreadId.make("thread-1"),
+          messageId: queuedMessage.id,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          createdAt: "2026-04-01T14:01:00.000Z",
+        },
+      });
+      expect(queued.kind).toBe("updated");
+      if (queued.kind !== "updated") return;
+      expect(queued.thread.messages[0]?.deliveryState).toBe("queued");
+
+      const dispatched = applyThreadDetailEvent(queued.thread, {
+        ...baseEventFields,
+        sequence: 17,
+        occurredAt: "2026-04-01T14:02:00.000Z",
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-1"),
+        type: "thread.queued-turn-dispatched",
+        payload: {
+          threadId: ThreadId.make("thread-1"),
+          messageId: queuedMessage.id,
+          dispatchedAt: "2026-04-01T14:02:00.000Z",
+        },
+      });
+      expect(dispatched.kind).toBe("updated");
+      if (dispatched.kind !== "updated") return;
+      expect(dispatched.thread.messages[0]?.deliveryState).toBeUndefined();
+
+      const cancelled = applyThreadDetailEvent(queued.thread, {
+        ...baseEventFields,
+        sequence: 18,
+        occurredAt: "2026-04-01T14:03:00.000Z",
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-1"),
+        type: "thread.queued-turn-cancelled",
+        payload: {
+          threadId: ThreadId.make("thread-1"),
+          messageId: queuedMessage.id,
+          cancelledAt: "2026-04-01T14:03:00.000Z",
+        },
+      });
+      expect(cancelled.kind).toBe("updated");
+      if (cancelled.kind === "updated") {
+        expect(cancelled.thread.messages).toHaveLength(0);
+      }
+    });
+  });
+
   describe("no-op events", () => {
     it("returns unchanged for approval-response-requested", () => {
       const result = applyThreadDetailEvent(baseThread, {

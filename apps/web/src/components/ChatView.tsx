@@ -1298,6 +1298,10 @@ function ChatViewContent(props: ChatViewProps) {
     reportFailure: false,
   });
   const startThreadTurn = useAtomCommand(threadEnvironment.startTurn, { reportFailure: false });
+  const steerThreadTurn = useAtomCommand(threadEnvironment.steerTurn, { reportFailure: false });
+  const cancelQueuedTurn = useAtomCommand(threadEnvironment.cancelQueuedTurn, {
+    reportFailure: false,
+  });
   const uploadThreadFeedback = useAtomCommand(threadEnvironment.uploadFeedback, {
     reportFailure: false,
   });
@@ -1419,6 +1423,9 @@ function ChatViewContent(props: ChatViewProps) {
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [expandedImage, setExpandedImage] = useState<ExpandedImagePreview | null>(null);
   const [optimisticUserMessages, setOptimisticUserMessages] = useState<ChatMessage[]>([]);
+  const [activeTurnDeliveryMode, setActiveTurnDeliveryMode] = useState<"steer" | "after-current">(
+    "after-current",
+  );
   const [feedbackSubmissionsByThreadKey, setFeedbackSubmissionsByThreadKey] = useState<
     Record<string, ReadonlyArray<CodexFeedbackSubmission>>
   >({});
@@ -5856,24 +5863,43 @@ function ChatViewContent(props: ChatViewProps) {
       if (backgroundThreadRef) {
         beginBackgroundDraftSubmissionByRef(backgroundThreadRef);
       }
-      const startResult = await startThreadTurn({
-        environmentId,
-        input: {
-          threadId: threadIdForSend,
-          message: {
-            messageId: messageIdForSend,
-            role: "user",
-            text: outgoingMessageText,
-            attachments: turnAttachmentsResult.value,
-          },
-          modelSelection: ctxSelectedModelSelection,
-          titleSeed: title,
-          runtimeMode,
-          interactionMode,
-          ...(bootstrap ? { bootstrap } : {}),
-          createdAt: messageCreatedAt,
-        },
-      });
+      const startResult =
+        phase === "running" && activeRunningTurnId !== null && activeTurnDeliveryMode === "steer"
+          ? await steerThreadTurn({
+              environmentId,
+              input: {
+                threadId: threadIdForSend,
+                expectedTurnId: activeRunningTurnId,
+                message: {
+                  messageId: messageIdForSend,
+                  role: "user",
+                  text: outgoingMessageText,
+                  attachments: turnAttachmentsResult.value,
+                },
+                createdAt: messageCreatedAt,
+              },
+            })
+          : await startThreadTurn({
+              environmentId,
+              input: {
+                threadId: threadIdForSend,
+                message: {
+                  messageId: messageIdForSend,
+                  role: "user",
+                  text: outgoingMessageText,
+                  attachments: turnAttachmentsResult.value,
+                },
+                modelSelection: ctxSelectedModelSelection,
+                titleSeed: title,
+                runtimeMode,
+                interactionMode,
+                ...(activeTurnDeliveryMode === "after-current" && phase === "running"
+                  ? { deliveryMode: "after-current" as const }
+                  : {}),
+                ...(bootstrap ? { bootstrap } : {}),
+                createdAt: messageCreatedAt,
+              },
+            });
       if (startResult._tag === "Failure") {
         if (backgroundThreadRef) {
           clearBackgroundDraftSubmissionByRef(backgroundThreadRef);
@@ -6658,6 +6684,16 @@ function ChatViewContent(props: ChatViewProps) {
     }
     void onRevertToTurnCountRef.current(targetTurnCount);
   }, []);
+  const onCancelQueuedMessage = useCallback(
+    (messageId: MessageId) => {
+      if (!activeThread) return;
+      void cancelQueuedTurn({
+        environmentId,
+        input: { threadId: activeThread.id, messageId },
+      });
+    },
+    [activeThread, cancelQueuedTurn, environmentId],
+  );
 
   // Empty state: no active thread
   if (!activeThread) {
@@ -6927,6 +6963,7 @@ function ChatViewContent(props: ChatViewProps) {
                 onOpenTurnDiff={onOpenTurnDiff}
                 revertTurnCountByUserMessageId={revertTurnCountByUserMessageId}
                 onRevertUserMessage={onRevertUserMessage}
+                onCancelQueuedMessage={onCancelQueuedMessage}
                 isRevertingCheckpoint={isRevertingCheckpoint}
                 onImageExpand={onExpandTimelineImage}
                 markdownCwd={gitCwd ?? undefined}
@@ -7039,6 +7076,8 @@ function ChatViewContent(props: ChatViewProps) {
                             forceExpandedOnMobile={forceExpandedMobileComposer && isDraftHeroState}
                             projectSelectionRequired={isLocalDraftThread && activeProject === null}
                             phase={phase}
+                            activeTurnDeliveryMode={activeTurnDeliveryMode}
+                            onActiveTurnDeliveryModeChange={setActiveTurnDeliveryMode}
                             isConnecting={isConnecting}
                             isSendBusy={isSendBusy}
                             sendDisabledReason={

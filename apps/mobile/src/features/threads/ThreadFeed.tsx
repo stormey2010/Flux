@@ -160,6 +160,7 @@ export interface ThreadFeedProps {
   readonly freeze: SharedValue<boolean>;
   readonly anchorMessageId: MessageId | null;
   readonly submittedMessageId: MessageId | null;
+  readonly onCancelQueuedMessage: (messageId: MessageId) => void;
   readonly contentInsetEndAdjustment: SharedValue<number>;
   readonly contentTopInset?: number;
   readonly contentBottomInset?: number;
@@ -980,6 +981,7 @@ function renderFeedEntry(
     readonly terminalAssistantMessageIds: ReadonlySet<string>;
     readonly unsettledTurnId: TurnId | null;
     readonly onCopyWorkRow: (rowId: string, value: string) => void;
+    readonly onCancelQueuedMessage: (messageId: MessageId) => void;
     readonly onToggleWorkGroup: (groupId: string) => void;
     readonly onToggleWorkRow: (rowId: string) => void;
     readonly onToggleTurnFold: (turnId: TurnId) => void;
@@ -1111,6 +1113,20 @@ function renderFeedEntry(
                 buttonSize={28}
                 iconSize={13}
               />
+            ) : null}
+            {message.deliveryState === "queued" ? (
+              <>
+                <Text className="font-t3-medium text-xs text-foreground-muted">Run next</Text>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Cancel queued message"
+                  hitSlop={6}
+                  onPress={() => props.onCancelQueuedMessage(message.id)}
+                  className="rounded-md px-1.5 py-0.5"
+                >
+                  <Text className="font-t3-medium text-xs text-foreground-muted">Cancel</Text>
+                </Pressable>
+              </>
             ) : null}
           </View>
         </Animated.View>
@@ -2019,6 +2035,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
         terminalAssistantMessageIds,
         unsettledTurnId,
         onCopyWorkRow,
+        onCancelQueuedMessage: props.onCancelQueuedMessage,
         onToggleWorkGroup,
         onToggleWorkRow,
         onToggleTurnFold,
@@ -2045,6 +2062,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
       reviewCommentBubbleWidth,
       userBubbleMaxWidth,
       onCopyWorkRow,
+      props.onCancelQueuedMessage,
       onMarkdownLinkPress,
       onPressImage,
       onToggleTurnFold,

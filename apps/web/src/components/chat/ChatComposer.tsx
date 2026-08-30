@@ -577,6 +577,8 @@ export interface ChatComposerProps {
 
   // Session phase
   phase: SessionPhase;
+  activeTurnDeliveryMode?: "steer" | "after-current";
+  onActiveTurnDeliveryModeChange?: (mode: "steer" | "after-current") => void;
   isConnecting: boolean;
   isSendBusy: boolean;
   sendDisabledReason: string | null;
@@ -691,6 +693,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     forceExpandedOnMobile,
     projectSelectionRequired,
     phase,
+    activeTurnDeliveryMode = "after-current",
+    onActiveTurnDeliveryModeChange = () => {},
     isConnecting,
     isSendBusy,
     sendDisabledReason: externalSendDisabledReason,
@@ -3649,6 +3653,31 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   }
                   className="flex shrink-0 flex-nowrap items-center justify-end gap-2"
                 >
+                  {phase === "running" && activeThreadId !== null ? (
+                    <Button
+                      type="button"
+                      size="xs"
+                      variant="ghost"
+                      onClick={() =>
+                        onActiveTurnDeliveryModeChange(
+                          activeTurnDeliveryMode === "steer" ? "after-current" : "steer",
+                        )
+                      }
+                      aria-label={
+                        activeTurnDeliveryMode === "steer"
+                          ? "Send with Run next"
+                          : "Send with Steer"
+                      }
+                      title={
+                        activeTurnDeliveryMode === "steer"
+                          ? "Steer active turn"
+                          : "Run after current turn"
+                      }
+                      className="shrink-0 px-2 text-xs text-muted-foreground"
+                    >
+                      {activeTurnDeliveryMode === "steer" ? "Steer" : "Run next"}
+                    </Button>
+                  ) : null}
                   {showMobilePendingAnswerActions ? null : inlineTasksBadge}
                   {showMobilePendingAnswerActions ? null : inlineStashBadge}
                   <ComposerFooterPrimaryActions

@@ -42,6 +42,8 @@ export interface Preferences {
   readonly legacyThreadListEnabled?: boolean;
   /** Device-local counterpart of desktop's `planModeEnabled` legacy flag. */
   readonly planModeEnabled?: boolean;
+  /** When false, active-turn messages wait on the server for Run Next. */
+  readonly steerActiveTurns?: boolean;
   /** Undefined preserves the default expanded Settled shelf. */
   readonly threadListV2SettledShelfExpanded?: boolean;
   /** Undefined preserves the default collapsed Snoozed shelf. */
@@ -104,6 +106,7 @@ function sanitizePreferences(parsed: Preferences): Preferences {
     autoSettleOnMerge?: boolean;
     legacyThreadListEnabled?: boolean;
     planModeEnabled?: boolean;
+    steerActiveTurns?: boolean;
     threadListV2SettledShelfExpanded?: boolean;
     threadListV2SnoozedShelfExpanded?: boolean;
   } = {};

@@ -17,6 +17,7 @@ import {
   ProviderRespondToRequestInput,
   ProviderRespondToUserInputInput,
   ProviderSendTurnInput,
+  ProviderSteerTurnInput,
   ProviderSessionStartInput,
   ProviderStopSessionInput,
   ProviderUploadFeedbackInput,
@@ -827,6 +828,54 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     );
   });
 
+  const steerTurn: NonNullable<ProviderServiceMethod<"steerTurn">> = Effect.fn("steerTurn")(
+    function* (rawInput) {
+      const input = yield* decodeInputOrValidationError({
+        operation: "ProviderService.steerTurn",
+        schema: ProviderSteerTurnInput,
+        payload: rawInput,
+      });
+      const attachments = input.attachments ?? [];
+      if (!input.input && attachments.length === 0) {
+        return yield* toValidationError(
+          "ProviderService.steerTurn",
+          "Either input text or at least one attachment is required",
+        );
+      }
+      const routed = yield* resolveRoutableSession({
+        threadId: input.threadId,
+        operation: "ProviderService.steerTurn",
+        allowRecovery: false,
+      });
+      yield* Effect.annotateCurrentSpan({
+        "provider.operation": "steer-turn",
+        "provider.kind": routed.adapter.provider,
+        "provider.thread_id": input.threadId,
+        "provider.turn_id": input.expectedTurnId,
+      });
+      const turn = routed.adapter.steerTurn
+        ? yield* routed.adapter.steerTurn(input)
+        : yield* routed.adapter.sendTurn({
+            threadId: input.threadId,
+            ...(input.input !== undefined ? { input: input.input } : {}),
+            ...(attachments.length > 0 ? { attachments } : {}),
+          });
+      yield* directory.upsert({
+        threadId: input.threadId,
+        provider: routed.adapter.provider,
+        providerInstanceId: routed.instanceId,
+        status: "running",
+        ...(turn.resumeCursor !== undefined ? { resumeCursor: turn.resumeCursor } : {}),
+        runtimePayload: {
+          activeTurnId: turn.turnId,
+          lastRuntimeEvent: "provider.steerTurn",
+          lastRuntimeEventAt: yield* nowIso,
+        },
+      });
+      return turn;
+    },
+  );
+
   const interruptTurn: ProviderServiceMethod<"interruptTurn"> = Effect.fn("interruptTurn")(
     function* (rawInput) {
       const input = yield* decodeInputOrValidationError({
@@ -1222,6 +1271,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
   return {
     startSession,
     sendTurn,
+    steerTurn,
     interruptTurn,
     respondToRequest,
     respondToUserInput,

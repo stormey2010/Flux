@@ -10,10 +10,12 @@ import {
   ProviderInteractionMode,
   RuntimeMode,
   ThreadId,
+  ThreadTurnDeliveryMode,
   type ModelSelection as ModelSelectionType,
   type ProjectId as ProjectIdType,
   type ProviderInteractionMode as ProviderInteractionModeType,
   type RuntimeMode as RuntimeModeType,
+  type ThreadTurnDeliveryMode as ThreadTurnDeliveryModeType,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 
@@ -47,6 +49,7 @@ export const QueuedThreadMessageSchema = Schema.Struct({
   modelSelection: Schema.optional(ModelSelection),
   runtimeMode: Schema.optional(RuntimeMode),
   interactionMode: Schema.optional(ProviderInteractionMode),
+  deliveryMode: Schema.optional(ThreadTurnDeliveryMode),
   // Present when the queued item creates a brand-new thread (pending task)
   // instead of appending a turn to an existing one.
   creation: Schema.optional(QueuedThreadCreationSchema),
@@ -76,6 +79,7 @@ export interface QueuedThreadMessage {
   readonly modelSelection?: ModelSelectionType;
   readonly runtimeMode?: RuntimeModeType;
   readonly interactionMode?: ProviderInteractionModeType;
+  readonly deliveryMode?: ThreadTurnDeliveryModeType;
   readonly creation?: QueuedThreadCreation;
   readonly createdAt: string;
 }

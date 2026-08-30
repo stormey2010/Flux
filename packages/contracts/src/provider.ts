@@ -3,6 +3,7 @@ import { TrimmedNonEmptyString } from "./baseSchemas.ts";
 import {
   ApprovalRequestId,
   EventId,
+  MessageId,
   IsoDateTime,
   ProviderItemId,
   ThreadId,
@@ -77,6 +78,19 @@ export const ProviderSendTurnInput = Schema.Struct({
   interactionMode: Schema.optional(ProviderInteractionMode),
 });
 export type ProviderSendTurnInput = typeof ProviderSendTurnInput.Type;
+
+export const ProviderSteerTurnInput = Schema.Struct({
+  threadId: ThreadId,
+  expectedTurnId: TurnId,
+  clientUserMessageId: Schema.optional(MessageId),
+  input: Schema.optional(
+    TrimmedNonEmptyString.check(Schema.isMaxLength(PROVIDER_SEND_TURN_MAX_INPUT_CHARS)),
+  ),
+  attachments: Schema.optional(
+    Schema.Array(ChatAttachment).check(Schema.isMaxLength(PROVIDER_SEND_TURN_MAX_ATTACHMENTS)),
+  ),
+});
+export type ProviderSteerTurnInput = typeof ProviderSteerTurnInput.Type;
 
 export const ProviderTurnStartResult = Schema.Struct({
   threadId: ThreadId,

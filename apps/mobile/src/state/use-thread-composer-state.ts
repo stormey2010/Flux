@@ -2,6 +2,7 @@ import { useAtomValue } from "@effect/atom-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Alert } from "react-native";
 import * as Cause from "effect/Cause";
+import * as AsyncResult from "effect/unstable/reactivity/AsyncResult";
 
 import {
   CommandId,
@@ -9,6 +10,7 @@ import {
   type EnvironmentId,
   type ModelSelection,
   type ProviderInteractionMode,
+  type ThreadTurnDeliveryMode,
   type RuntimeMode,
   type ThreadId,
 } from "@t3tools/contracts";
@@ -53,6 +55,7 @@ import { enqueueThreadOutboxMessage } from "./thread-outbox";
 import { useThreadOutboxMessages } from "./use-thread-outbox";
 import { threadEnvironment } from "./threads";
 import { useAtomCommand } from "./use-atom-command";
+import { mobilePreferencesAtom } from "./preferences";
 
 export function appendReviewCommentToDraft(input: {
   readonly environmentId: EnvironmentId;
@@ -90,6 +93,13 @@ export function useThreadComposerState() {
   const selectedThreadDetail = useSelectedThreadDetail();
   const composerDrafts = useAtomValue(composerDraftsAtom);
   const queuedMessagesByThreadKey = useThreadOutboxMessages();
+  const preferences = useAtomValue(mobilePreferencesAtom);
+  const [deliveryMode, setDeliveryMode] = useState<ThreadTurnDeliveryMode>("immediate");
+  useEffect(() => {
+    if (AsyncResult.isSuccess(preferences)) {
+      setDeliveryMode(preferences.value.steerActiveTurns === false ? "after-current" : "immediate");
+    }
+  }, [preferences]);
   const [feedbackSubmissionsByThreadKey, setFeedbackSubmissionsByThreadKey] = useState<
     Record<string, ReadonlyArray<CodexFeedbackSubmission>>
   >({});
@@ -253,6 +263,7 @@ export function useThreadComposerState() {
       modelSelection: draft.modelSelection ?? thread.modelSelection,
       runtimeMode: draft.runtimeMode ?? thread.runtimeMode,
       interactionMode: draft.interactionMode ?? thread.interactionMode,
+      deliveryMode,
       createdAt: metadata.createdAt,
     });
     clearComposerDraftContent(threadKey);
@@ -269,6 +280,8 @@ export function useThreadComposerState() {
     });
     return messageId;
   }, [
+    preferences,
+    deliveryMode,
     selectedEnvironmentRuntime?.serverConfig?.providers,
     selectedThreadDetail,
     selectedThreadShell,
@@ -402,6 +415,8 @@ export function useThreadComposerState() {
     modelSelection,
     runtimeMode,
     interactionMode,
+    deliveryMode,
+    setDeliveryMode,
     onChangeDraftMessage,
     onPickDraftImages,
     onPasteIntoDraft,
