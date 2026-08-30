@@ -55,11 +55,13 @@ import {
   showContextMenu,
 } from "./methods/window.ts";
 import * as PreviewIpc from "./methods/preview.ts";
+import * as SpeechIpc from "./methods/speech.ts";
 import { getWslState, setWslBackendEnabled, setWslDistro, setWslOnly } from "./methods/wsl.ts";
 
 export const installDesktopIpcHandlers = Effect.fn("desktop.ipc.installHandlers")(function* () {
   const ipc = yield* DesktopIpc.DesktopIpc;
   yield* PreviewIpc.installPreviewEventForwarding();
+  yield* SpeechIpc.installSpeechEventForwarding();
 
   yield* ipc.handleSync(getAppBranding);
   yield* ipc.handleSync(getSystemLocale);
@@ -112,6 +114,11 @@ export const installDesktopIpcHandlers = Effect.fn("desktop.ipc.installHandlers"
   yield* ipc.handle(downloadUpdate);
   yield* ipc.handle(installUpdate);
   yield* ipc.handle(checkForUpdate);
+  yield* ipc.handle(SpeechIpc.getSpeechStatus);
+  yield* ipc.handle(SpeechIpc.startSpeech);
+  yield* ipc.handle(SpeechIpc.stopSpeech);
+  yield* ipc.handle(SpeechIpc.cancelSpeech);
+  yield* ipc.handle(SpeechIpc.removeSpeechModelMethod);
   for (const previewMethod of PreviewIpc.methods) {
     yield* ipc.handle(previewMethod);
   }

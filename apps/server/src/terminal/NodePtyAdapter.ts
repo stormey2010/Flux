@@ -1,3 +1,4 @@
+import { spawn as spawnOsProcess } from "node:child_process";
 import * as NodeModule from "node:module";
 
 import * as Effect from "effect/Effect";
@@ -69,9 +70,23 @@ const ensureNodePtySpawnHelperExecutable = Effect.fn(function* () {
 
 class NodePtyProcess implements PtyAdapter.PtyProcess {
   private readonly process: import("node-pty").IPty;
+  private readonly platform: NodeJS.Platform;
+  private readonly exitListeners = new Set<(event: PtyAdapter.PtyExitEvent) => void>();
+  private exitEvent: PtyAdapter.PtyExitEvent | undefined;
 
-  constructor(process: import("node-pty").IPty) {
+  constructor(process: import("node-pty").IPty, platform: NodeJS.Platform) {
     this.process = process;
+    this.platform = platform;
+    this.process.onExit((event) => {
+      if (this.exitEvent) return;
+      this.exitEvent = {
+        exitCode: event.exitCode,
+        signal: event.signal ?? null,
+      };
+      for (const listener of this.exitListeners) {
+        listener(this.exitEvent);
+      }
+    });
   }
 
   get pid(): number {
@@ -87,6 +102,40 @@ class NodePtyProcess implements PtyAdapter.PtyProcess {
   }
 
   kill(signal?: string): void {
+    // node-pty 1.1.0's Windows conpty teardown resolves its console process
+    // list as `undefined` and then calls `.forEach` on it inside its own
+    // promise continuation (`windowsPtyAgent.js:141`). Nothing handles that
+    // rejection, so killing a live PTY on Windows terminates this entire
+    // process. The throw is asynchronous, so no try/catch around `kill()` can
+    // intercept it — the only reliable avoidance is to not enter that code
+    // path. Kill the OS process tree directly instead; conpty resources are
+    // reclaimed when the process goes away.
+    if (this.platform === "win32") {
+      try {
+        // `process.kill` only signals the PTY host PID. Usage probes (and
+        // `.cmd` shims) launch the real CLI under `cmd.exe /c`, so descendants
+        // would otherwise survive timeouts as orphans. `/T` kills the tree.
+        const killer = spawnOsProcess("taskkill", ["/PID", String(this.process.pid), "/T", "/F"], {
+          stdio: "ignore",
+          windowsHide: true,
+        });
+        killer.once("error", () => {
+          try {
+            process.kill(this.process.pid);
+          } catch {
+            return;
+          }
+        });
+        killer.unref();
+      } catch {
+        try {
+          process.kill(this.process.pid);
+        } catch {
+          // Already gone, or we lack permission — nothing useful to do.
+        }
+      }
+      return;
+    }
     this.process.kill(signal);
   }
 
@@ -98,14 +147,21 @@ class NodePtyProcess implements PtyAdapter.PtyProcess {
   }
 
   onExit(callback: (event: PtyAdapter.PtyExitEvent) => void): () => void {
-    const disposable = this.process.onExit((event) => {
-      callback({
-        exitCode: event.exitCode,
-        signal: event.signal ?? null,
+    if (this.exitEvent) {
+      const exitEvent = this.exitEvent;
+      let unsubscribed = false;
+      // Replay after the current setup stack so Terminal Manager can assign
+      // `session.process` / `status: "running"` before enqueueProcessEvent.
+      queueMicrotask(() => {
+        if (!unsubscribed) callback(exitEvent);
       });
-    });
+      return () => {
+        unsubscribed = true;
+      };
+    }
+    this.exitListeners.add(callback);
     return () => {
-      disposable.dispose();
+      this.exitListeners.delete(callback);
     };
   }
 }
@@ -164,7 +220,7 @@ export const make = Effect.fn("NodePtyAdapter.make")(function* (
             cause,
           }),
       });
-      return new NodePtyProcess(ptyProcess);
+      return new NodePtyProcess(ptyProcess, platform);
     }),
   });
 });

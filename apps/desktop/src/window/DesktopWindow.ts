@@ -385,7 +385,7 @@ export const make = Effect.gen(function* () {
 
     // Electron does not reliably apply Chromium's browser permission prompt
     // to a custom app protocol. Configure the main session explicitly so
-    // SpeechRecognition/getUserMedia can use the user's microphone in Code.
+    // Web microphone APIs can use the user's microphone in Flux.
     const mainSession = window.webContents.session;
     if (mainSession) {
       mainSession.setPermissionRequestHandler((_webContents, permission, callback) => {

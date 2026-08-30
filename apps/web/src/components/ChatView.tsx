@@ -1423,9 +1423,6 @@ function ChatViewContent(props: ChatViewProps) {
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [expandedImage, setExpandedImage] = useState<ExpandedImagePreview | null>(null);
   const [optimisticUserMessages, setOptimisticUserMessages] = useState<ChatMessage[]>([]);
-  const [activeTurnDeliveryMode, setActiveTurnDeliveryMode] = useState<"steer" | "after-current">(
-    "after-current",
-  );
   const [feedbackSubmissionsByThreadKey, setFeedbackSubmissionsByThreadKey] = useState<
     Record<string, ReadonlyArray<CodexFeedbackSubmission>>
   >({});
@@ -5864,7 +5861,9 @@ function ChatViewContent(props: ChatViewProps) {
         beginBackgroundDraftSubmissionByRef(backgroundThreadRef);
       }
       const startResult =
-        phase === "running" && activeRunningTurnId !== null && activeTurnDeliveryMode === "steer"
+        phase === "running" &&
+        activeRunningTurnId !== null &&
+        settings.activeTurnMessageBehavior === "steer"
           ? await steerThreadTurn({
               environmentId,
               input: {
@@ -5893,7 +5892,7 @@ function ChatViewContent(props: ChatViewProps) {
                 titleSeed: title,
                 runtimeMode,
                 interactionMode,
-                ...(activeTurnDeliveryMode === "after-current" && phase === "running"
+                ...(settings.activeTurnMessageBehavior === "queue" && phase === "running"
                   ? { deliveryMode: "after-current" as const }
                   : {}),
                 ...(bootstrap ? { bootstrap } : {}),
@@ -7076,8 +7075,6 @@ function ChatViewContent(props: ChatViewProps) {
                             forceExpandedOnMobile={forceExpandedMobileComposer && isDraftHeroState}
                             projectSelectionRequired={isLocalDraftThread && activeProject === null}
                             phase={phase}
-                            activeTurnDeliveryMode={activeTurnDeliveryMode}
-                            onActiveTurnDeliveryModeChange={setActiveTurnDeliveryMode}
                             isConnecting={isConnecting}
                             isSendBusy={isSendBusy}
                             sendDisabledReason={

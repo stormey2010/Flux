@@ -124,6 +124,10 @@ export const EnvironmentIdentificationMode = Schema.Literals(["artwork", "pill",
 export type EnvironmentIdentificationMode = typeof EnvironmentIdentificationMode.Type;
 export const DEFAULT_ENVIRONMENT_IDENTIFICATION_MODE: EnvironmentIdentificationMode = "artwork";
 
+export const ActiveTurnMessageBehavior = Schema.Literals(["steer", "queue"]);
+export type ActiveTurnMessageBehavior = typeof ActiveTurnMessageBehavior.Type;
+export const DEFAULT_ACTIVE_TURN_MESSAGE_BEHAVIOR: ActiveTurnMessageBehavior = "steer";
+
 /**
  * A user-chosen font family (a single name or a comma-separated list). Empty
  * means "use the app default"; clients compose their own fallback stacks.
@@ -141,6 +145,9 @@ export const DEFAULT_BROWSER_VIEWPORT: PreviewViewportSetting = FILL_PREVIEW_VIE
 export const DEFAULT_BROWSER_AUTO_SHOW_FLOATING_PREVIEW = true;
 
 export const ClientSettingsSchema = Schema.Struct({
+  activeTurnMessageBehavior: ActiveTurnMessageBehavior.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_ACTIVE_TURN_MESSAGE_BEHAVIOR)),
+  ),
   appearanceContrast: AppearanceContrast.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_APPEARANCE_CONTRAST)),
   ),
@@ -226,6 +233,11 @@ export const ClientSettingsSchema = Schema.Struct({
   // commands) for users who still rely on the old workflow.
   planModeEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   showSkillsInSlashMenu: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  // Composer chrome: remaining session/weekly usage for the thread's current
+  // provider only. Off by default so the chat box stays quiet unless opted in.
+  showProviderUsageInComposer: Schema.Boolean.pipe(
+    Schema.withDecodingDefault(Effect.succeed(false)),
+  ),
   // Legacy sidebar (the original per-project tree). Deliberately a fresh key
   // (was `sidebarV2Enabled` + `sidebarV2ConfiguredByUser`): decoding drops the
   // old keys, so everyone, including prior beta opt-outs, resets to the new
@@ -1047,6 +1059,7 @@ export const ServerSettingsPatch = Schema.Struct({
 export type ServerSettingsPatch = typeof ServerSettingsPatch.Type;
 
 export const ClientSettingsPatch = Schema.Struct({
+  activeTurnMessageBehavior: Schema.optionalKey(ActiveTurnMessageBehavior),
   appearanceContrast: Schema.optionalKey(AppearanceContrast),
   browserDefaultViewport: Schema.optionalKey(PreviewViewportSetting),
   browserDefaultZoomFactor: Schema.optionalKey(PreviewZoomFactor),
@@ -1090,6 +1103,7 @@ export const ClientSettingsPatch = Schema.Struct({
   ),
   planModeEnabled: Schema.optionalKey(Schema.Boolean),
   showSkillsInSlashMenu: Schema.optionalKey(Schema.Boolean),
+  showProviderUsageInComposer: Schema.optionalKey(Schema.Boolean),
   legacySidebarEnabled: Schema.optionalKey(Schema.Boolean),
   sidebarAutoSettleAfterDays: Schema.optionalKey(Schema.NullOr(SidebarAutoSettleAfterDays)),
   sidebarAutoSettleOnMerge: Schema.optionalKey(Schema.Boolean),

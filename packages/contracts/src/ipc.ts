@@ -26,6 +26,7 @@ import type {
 } from "./review.ts";
 import type { FilesystemBrowseInput, FilesystemBrowseResult } from "./filesystem.ts";
 import type { AssetCreateUrlInput, AssetCreateUrlResult } from "./assets.ts";
+import type { DesktopSpeechEvent, DesktopSpeechStatus } from "./speech.ts";
 import type {
   ProjectListEntriesInput,
   ProjectListEntriesResult,
@@ -1237,6 +1238,15 @@ export interface DesktopBridge {
   downloadUpdate: () => Promise<DesktopUpdateActionResult>;
   installUpdate: () => Promise<DesktopUpdateActionResult>;
   onUpdateState: (listener: (state: DesktopUpdateState) => void) => () => void;
+  /** Desktop-local speech input. Absent in older desktop shells and regular browsers. */
+  speech?: {
+    getStatus: () => Promise<DesktopSpeechStatus>;
+    start: () => Promise<DesktopSpeechStatus>;
+    stop: () => Promise<DesktopSpeechStatus>;
+    cancel: () => Promise<DesktopSpeechStatus>;
+    removeModel: () => Promise<DesktopSpeechStatus>;
+    onEvent: (listener: (event: DesktopSpeechEvent) => void) => () => void;
+  };
   /**
    * Desktop-only preview surface. Present iff the renderer is hosted by the
    * Electron desktop build; web builds have `preview === undefined`.

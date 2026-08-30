@@ -7,6 +7,7 @@ import {
   ClientSettingsPatch,
   ClaudeSettings,
   DEFAULT_SERVER_SETTINGS,
+  DEFAULT_ACTIVE_TURN_MESSAGE_BEHAVIOR,
   defaultEnabledForDriver,
   resolveProviderInstanceEnabled,
   ServerSettings,
@@ -19,6 +20,22 @@ const decodeServerSettings = Schema.decodeUnknownSync(ServerSettings);
 const decodeServerSettingsPatch = Schema.decodeUnknownSync(ServerSettingsPatch);
 const encodeServerSettings = Schema.encodeSync(ServerSettings);
 const decodeClaudeSettings = Schema.decodeUnknownSync(ClaudeSettings);
+
+describe("ClientSettings active-turn message behavior", () => {
+  it("defaults to steering and accepts queue mode", () => {
+    expect(decodeClientSettings({}).activeTurnMessageBehavior).toBe(
+      DEFAULT_ACTIVE_TURN_MESSAGE_BEHAVIOR,
+    );
+    expect(
+      decodeClientSettingsPatch({ activeTurnMessageBehavior: "queue" }).activeTurnMessageBehavior,
+    ).toBe("queue");
+  });
+
+  it("rejects unsupported active-turn behavior", () => {
+    expect(() => decodeClientSettings({ activeTurnMessageBehavior: "immediate" })).toThrow();
+    expect(() => decodeClientSettingsPatch({ activeTurnMessageBehavior: "immediate" })).toThrow();
+  });
+});
 
 describe("ClaudeSettings auto-compaction", () => {
   it("uses Claude's default threshold when no override is configured", () => {
@@ -46,6 +63,15 @@ describe("ClaudeSettings auto-compaction", () => {
     expect(
       decodeServerSettingsPatch({ providers: { claudeAgent: { autoCompactWindow: "300000" } } }),
     ).toBeDefined();
+  });
+});
+
+describe("ClientSettings composer usage", () => {
+  it("keeps provider usage out of the chat box until opted in", () => {
+    expect(decodeClientSettings({}).showProviderUsageInComposer).toBe(false);
+    expect(
+      decodeClientSettingsPatch({ showProviderUsageInComposer: true }).showProviderUsageInComposer,
+    ).toBe(true);
   });
 });
 

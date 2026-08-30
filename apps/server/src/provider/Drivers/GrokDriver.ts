@@ -2,6 +2,7 @@ import { GrokSettings, ProviderDriverKind, type ServerProvider } from "@t3tools/
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import { HttpClient } from "effect/unstable/http";
@@ -11,6 +12,7 @@ import * as BackgroundPolicy from "../../background/BackgroundPolicy.ts";
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { makeGrokTextGeneration } from "../../textGeneration/GrokTextGeneration.ts";
+import * as PtyAdapter from "../../terminal/PtyAdapter.ts";
 import { ProviderDriverError } from "../Errors.ts";
 import { makeGrokAdapter } from "../Layers/GrokAdapter.ts";
 import {
@@ -114,10 +116,15 @@ export const GrokDriver: ProviderDriver<GrokSettings, GrokDriverEnv> = {
       });
       const textGeneration = yield* makeGrokTextGeneration(effectiveConfig, processEnv);
 
+      const ptyAdapter = Option.getOrUndefined(yield* Effect.serviceOption(PtyAdapter.PtyAdapter));
       const checkProvider = checkGrokProviderStatus(effectiveConfig, processEnv, cwd).pipe(
         Effect.map(stampIdentity),
         Effect.provideService(Crypto.Crypto, crypto),
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+        (effect) =>
+          ptyAdapter
+            ? effect.pipe(Effect.provideService(PtyAdapter.PtyAdapter, ptyAdapter))
+            : effect,
       );
 
       const snapshotSettings = makeProviderSnapshotSettingsSource(effectiveConfig, serverSettings);

@@ -66,7 +66,6 @@ import {
   type PromptStashEntry,
 } from "../../promptStashStore";
 import { ComposerStashBadge } from "./ComposerStashBadge";
-import type { ComposerSpeechButtonHandle } from "./ComposerSpeechButton";
 import { ComposerStashMenu } from "./ComposerStashMenu";
 import {
   ComposerTasksBadge,
@@ -126,6 +125,8 @@ import {
   renderProviderTraitsMenuContent,
   renderProviderTraitsPicker,
 } from "./composerProviderState";
+import { ComposerUsageMeter } from "./ComposerUsageMeter";
+import { resolveComposerUsageMeter } from "./ComposerUsageMeter.logic";
 import { ContextWindowMeter } from "./ContextWindowMeter";
 import { resolveContextWindowModelDisplayName } from "./ContextWindowMeter.logic";
 import { buildExpandedImagePreview, type ExpandedImagePreview } from "./ExpandedImagePreview";
@@ -138,6 +139,9 @@ import {
   submitComposerDraft,
 } from "./composerSubmission";
 import { ComposerPromptLengthValidation } from "./ComposerPromptLengthValidation";
+import { ComposerSpeechButton } from "./ComposerSpeechButton";
+import { formatSpeechInsertion } from "../../speech/speechInsertion";
+import { useDesktopSpeechInput } from "../../speech/useDesktopSpeechInput";
 
 type ComposerCommandMenuPosition = {
   bottom: number;
@@ -439,6 +443,7 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
 
 const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(props: {
   compact: boolean;
+  composerUsage: ReturnType<typeof resolveComposerUsageMeter>;
   activeContextWindow: ContextWindowSnapshot | null;
   activeThreadModelDisplayName: string | null;
   isPreparingWorktree: boolean;
@@ -450,6 +455,7 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
     isComplete: boolean;
   } | null;
   isRunning: boolean;
+  activeTurnMessageBehavior?: UnifiedSettings["activeTurnMessageBehavior"];
   showPlanFollowUpPrompt: boolean;
   promptHasText: boolean;
   isSendBusy: boolean;
@@ -458,18 +464,18 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
   isEnvironmentUnavailable: boolean;
   hasSendableContent: boolean;
   preserveComposerFocusOnPointerDown?: boolean;
-  showSendWhileRunning?: boolean;
   onPreviousPendingQuestion: () => void;
   onInterrupt: () => void;
   onImplementPlanInNewThread: () => void;
-  onSpeechTranscript: (text: string) => void;
-  speechRef: React.RefObject<ComposerSpeechButtonHandle | null>;
   onCompactContext?: (() => void) | undefined;
   compactDisabled: boolean;
   compactDisabledReason: string | null;
 }) {
   return (
     <>
+      {props.composerUsage && !props.activeContextWindow ? (
+        <ComposerUsageMeter usage={props.composerUsage} />
+      ) : null}
       {props.activeContextWindow ? (
         <ContextWindowMeter
           usage={props.activeContextWindow}
@@ -477,6 +483,7 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
           onCompact={props.onCompactContext}
           compactDisabled={props.compactDisabled}
           compactDisabledReason={props.compactDisabledReason}
+          providerUsage={props.composerUsage}
         />
       ) : null}
       {props.isPreparingWorktree ? (
@@ -494,13 +501,11 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
         isEnvironmentUnavailable={props.isEnvironmentUnavailable}
         isPreparingWorktree={props.isPreparingWorktree}
         hasSendableContent={props.hasSendableContent}
+        activeTurnMessageBehavior={props.activeTurnMessageBehavior}
         preserveComposerFocusOnPointerDown={props.preserveComposerFocusOnPointerDown ?? false}
-        showSendWhileRunning={props.showSendWhileRunning ?? false}
         onPreviousPendingQuestion={props.onPreviousPendingQuestion}
         onInterrupt={props.onInterrupt}
         onImplementPlanInNewThread={props.onImplementPlanInNewThread}
-        onSpeechTranscript={props.onSpeechTranscript}
-        speechRef={props.speechRef}
       />
     </>
   );
@@ -577,8 +582,6 @@ export interface ChatComposerProps {
 
   // Session phase
   phase: SessionPhase;
-  activeTurnDeliveryMode?: "steer" | "after-current";
-  onActiveTurnDeliveryModeChange?: (mode: "steer" | "after-current") => void;
   isConnecting: boolean;
   isSendBusy: boolean;
   sendDisabledReason: string | null;
@@ -693,8 +696,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     forceExpandedOnMobile,
     projectSelectionRequired,
     phase,
-    activeTurnDeliveryMode = "after-current",
-    onActiveTurnDeliveryModeChange = () => {},
     isConnecting,
     isSendBusy,
     sendDisabledReason: externalSendDisabledReason,
@@ -936,6 +937,15 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const noProviderAvailable = selectedProviderEntry === undefined;
   const resolvedCompactDisabledReason =
     compactDisabledReason ?? (noProviderAvailable ? "Compacting is unavailable right now" : null);
+  const composerUsage = useMemo(
+    () =>
+      resolveComposerUsageMeter({
+        enabled: settings.showProviderUsageInComposer,
+        hasStartedTurn: activeThread?.latestTurn != null || phase === "running",
+        provider: selectedProviderEntry?.snapshot,
+      }),
+    [activeThread?.latestTurn, phase, selectedProviderEntry, settings.showProviderUsageInComposer],
+  );
   // The driver kind follows the instance that will actually run the turn,
   // which can differ from the persisted selection when that selection is
   // disabled.
@@ -1092,7 +1102,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   // Refs
   // ------------------------------------------------------------------
   const composerEditorRef = useRef<ComposerPromptEditorHandle>(null);
-  const speechButtonRef = useRef<ComposerSpeechButtonHandle>(null);
   const composerFormRef = useRef<HTMLFormElement>(null);
   const composerSurfaceRef = useRef<HTMLDivElement>(null);
   const providerInputRejectedRef = useRef(false);
@@ -1408,22 +1417,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       setComposerDraftPrompt(composerDraftTarget, nextPrompt);
     },
     [composerDraftTarget, setComposerDraftPrompt],
-  );
-
-  const appendSpeechTranscript = useCallback(
-    (transcript: string) => {
-      const text = transcript.trim();
-      if (text.length === 0) return;
-      const current = promptRef.current;
-      const separator = current.length > 0 && !/\s$/.test(current) ? " " : "";
-      const next = `${current}${separator}${text}`;
-      promptRef.current = next;
-      setPrompt(next);
-      setComposerCursor(next.length);
-      setComposerTrigger(detectComposerTrigger(next, next.length));
-      window.requestAnimationFrame(() => composerEditorRef.current?.focusAt(next.length));
-    },
-    [promptRef, setPrompt],
   );
 
   const addComposerImage = useCallback(
@@ -1835,6 +1828,20 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     };
   }, [composerCursor, composerTerminalContexts, promptRef]);
 
+  const insertSpeechTranscript = useCallback(
+    (text: string) => {
+      const snapshot = readComposerSnapshot();
+      const replacement = formatSpeechInsertion(snapshot.value, snapshot.expandedCursor, text);
+      if (!replacement) return;
+      applyPromptReplacement(snapshot.expandedCursor, snapshot.expandedCursor, replacement);
+    },
+    [applyPromptReplacement, readComposerSnapshot],
+  );
+  const speechInput = useDesktopSpeechInput(
+    insertSpeechTranscript,
+    JSON.stringify(composerDraftTarget),
+  );
+
   const resolveActiveComposerTrigger = useCallback((): {
     snapshot: { value: string; cursor: number; expandedCursor: number };
     trigger: ComposerTrigger | null;
@@ -2004,10 +2011,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
 
   const submitComposer = useCallback(
     (event?: { preventDefault: () => void }, intent: ComposerSubmissionIntent = "foreground") => {
-      // Commit any words still shown as an interim speech result before taking
-      // the draft snapshot. This makes clicking Send equivalent to clicking
-      // the microphone checkmark first.
-      speechButtonRef.current?.finish();
       if (noProviderAvailable || isSendDisabled) {
         event?.preventDefault();
         return;
@@ -3653,35 +3656,24 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   }
                   className="flex shrink-0 flex-nowrap items-center justify-end gap-2"
                 >
-                  {phase === "running" && activeThreadId !== null ? (
-                    <Button
-                      type="button"
-                      size="xs"
-                      variant="ghost"
-                      onClick={() =>
-                        onActiveTurnDeliveryModeChange(
-                          activeTurnDeliveryMode === "steer" ? "after-current" : "steer",
-                        )
-                      }
-                      aria-label={
-                        activeTurnDeliveryMode === "steer"
-                          ? "Send with Run next"
-                          : "Send with Steer"
-                      }
-                      title={
-                        activeTurnDeliveryMode === "steer"
-                          ? "Steer active turn"
-                          : "Run after current turn"
-                      }
-                      className="shrink-0 px-2 text-xs text-muted-foreground"
-                    >
-                      {activeTurnDeliveryMode === "steer" ? "Steer" : "Run next"}
-                    </Button>
-                  ) : null}
                   {showMobilePendingAnswerActions ? null : inlineTasksBadge}
                   {showMobilePendingAnswerActions ? null : inlineStashBadge}
+                  {speechInput.available ? (
+                    <ComposerSpeechButton
+                      status={speechInput.status}
+                      progress={speechInput.progress}
+                      level={speechInput.level}
+                      disabled={
+                        isConnecting || projectSelectionRequired || pendingUserInputs.length > 0
+                      }
+                      onStart={() => void speechInput.start()}
+                      onStop={() => void speechInput.stop()}
+                      onCancel={() => void speechInput.cancel()}
+                    />
+                  ) : null}
                   <ComposerFooterPrimaryActions
                     compact={isComposerPrimaryActionsCompact}
+                    composerUsage={composerUsage}
                     activeContextWindow={activeContextWindow}
                     activeThreadModelDisplayName={activeThreadModelDisplayName}
                     pendingAction={pendingPrimaryAction}
@@ -3700,13 +3692,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     }
                     isPreparingWorktree={isPreparingWorktree}
                     hasSendableContent={composerSendState.hasSendableContent}
+                    activeTurnMessageBehavior={settings.activeTurnMessageBehavior}
                     preserveComposerFocusOnPointerDown={isMobileViewport}
-                    showSendWhileRunning={isMobileViewport}
                     onPreviousPendingQuestion={onPreviousActivePendingUserInputQuestion}
                     onInterrupt={handleInterruptPrimaryAction}
                     onImplementPlanInNewThread={handleImplementPlanInNewThreadPrimaryAction}
-                    onSpeechTranscript={appendSpeechTranscript}
-                    speechRef={speechButtonRef}
                     compactDisabled={
                       compactDisabled || noProviderAvailable || isSendBusy || isConnecting
                     }

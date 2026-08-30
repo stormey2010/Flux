@@ -1,12 +1,12 @@
-import { memo, type PointerEventHandler, type RefObject } from "react";
+import { memo, type PointerEventHandler } from "react";
 import { ChevronDownIcon, ChevronLeftIcon } from "lucide-react";
+import type { ActiveTurnMessageBehavior } from "@t3tools/contracts/settings";
 import { useEnvironmentIdentificationMode } from "~/hooks/useSettings";
 import { cn } from "~/lib/utils";
 import { StageBackdropButtonArt, useSidebarStageBackdropVariant } from "../SidebarStageBackdrop";
 import { Button } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Spinner } from "../ui/spinner";
-import { ComposerSpeechButton, type ComposerSpeechButtonHandle } from "./ComposerSpeechButton";
 
 interface PendingActionState {
   questionIndex: number;
@@ -28,15 +28,11 @@ interface ComposerPrimaryActionsProps {
   isEnvironmentUnavailable: boolean;
   isPreparingWorktree: boolean;
   hasSendableContent: boolean;
+  activeTurnMessageBehavior?: ActiveTurnMessageBehavior | undefined;
   preserveComposerFocusOnPointerDown?: boolean;
-  /** Enter-to-send is disabled on mobile viewports, where stop would otherwise
-   * be the only primary action and a running turn could not be steered. */
-  showSendWhileRunning?: boolean;
   onPreviousPendingQuestion: () => void;
   onInterrupt: () => void;
   onImplementPlanInNewThread: () => void;
-  onSpeechTranscript?: (text: string) => void;
-  speechRef?: RefObject<ComposerSpeechButtonHandle | null>;
 }
 
 export const formatPendingPrimaryActionLabel = (input: {
@@ -73,13 +69,11 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   isEnvironmentUnavailable,
   isPreparingWorktree,
   hasSendableContent,
+  activeTurnMessageBehavior = "steer",
   preserveComposerFocusOnPointerDown = false,
-  showSendWhileRunning = false,
   onPreviousPendingQuestion,
   onInterrupt,
   onImplementPlanInNewThread,
-  onSpeechTranscript,
-  speechRef,
 }: ComposerPrimaryActionsProps) {
   const pointerFocusProps = preserveComposerFocusOnPointerDown
     ? { onPointerDown: preventPointerFocus }
@@ -97,7 +91,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
         "flex cursor-pointer items-center justify-center rounded-full bg-destructive/90 text-white shadow-xs shadow-destructive/24 inset-shadow-[0_1px_--theme(--color-white/16%)] transition-all duration-150 hover:bg-destructive hover:scale-105 active:inset-shadow-[0_1px_--theme(--color-black/8%)] active:shadow-none",
         insidePendingAction
           ? "size-8 sm:size-7"
-          : showSendWhileRunning && hasSendableContent
+          : hasSendableContent
             ? "size-9 sm:size-8"
             : "size-8 sm:h-8 sm:w-8",
       )}
@@ -251,7 +245,11 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
                 ? "Preparing worktree"
                 : isSendBusy
                   ? "Sending"
-                  : "Send message"
+                  : isRunning
+                    ? activeTurnMessageBehavior === "queue"
+                      ? "Queue message"
+                      : "Steer active turn"
+                    : "Send message"
       }
     >
       {stageBackdropVariant ? (
@@ -276,24 +274,13 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   );
 
   if (!isRunning) {
-    return (
-      <>
-        {onSpeechTranscript ? (
-          <ComposerSpeechButton
-            ref={speechRef}
-            disabled={isEnvironmentUnavailable || isConnecting || isSendBusy}
-            onTranscript={onSpeechTranscript}
-          />
-        ) : null}
-        {sendButton}
-      </>
-    );
+    return sendButton;
   }
 
   return (
     <>
       {renderStopGenerationButton(false)}
-      {showSendWhileRunning && hasSendableContent ? sendButton : null}
+      {sendButton}
     </>
   );
 });

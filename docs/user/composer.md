@@ -25,3 +25,7 @@ On desktop, press `Cmd+Enter` on macOS or `Ctrl+Enter` on Windows and Linux from
 start it in the background. Flux opens another new thread and shows an **Open** action for the
 thread that started. The new thread keeps the selected workspace mode and base branch. If **New
 worktree** is selected, each background thread creates its own worktree.
+
+On web and desktop, turn on **Show usage in chat** in **Settings → General** to show the current
+provider's remaining session and weekly limits next to the chat box. The meter stays hidden until
+the thread has sent its first message and only appears when the provider exposes usable quota data.

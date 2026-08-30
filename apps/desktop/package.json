@@ -15,6 +15,7 @@
     "@clerk/electron": "catalog:",
     "@clerk/electron-passkeys": "catalog:",
     "@effect/platform-node": "catalog:",
+    "@picovoice/pvrecorder-node": "1.2.9",
     "@t3tools/client-runtime": "workspace:*",
     "@t3tools/contracts": "workspace:*",
     "@t3tools/shared": "workspace:*",
@@ -25,7 +26,8 @@
     "electron-store": "^8.2.0",
     "electron-updater": "^6.6.2",
     "playwright-core": "1.60.0",
-    "react-grab": "^0.1.32"
+    "react-grab": "^0.1.32",
+    "transcribe-cpp": "0.2.1"
   },
   "devDependencies": {
     "@effect/vitest": "catalog:",

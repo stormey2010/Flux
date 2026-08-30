@@ -12,6 +12,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAtomValue } from "@effect/atom-react";
 import {
   type BackgroundActivityProfile,
+  type DesktopSpeechStatus,
   ProviderDriverKind,
   type ScopedThreadRef,
   type SidebarProjectGroupingMode,
@@ -243,7 +244,9 @@ function AboutVersionSection() {
   const handleUpdateTrackChange = useCallback(
     (track: "stable" | "nightly") => {
       const bridge = window.desktopBridge;
-      if (!bridge?.setAlphaUpdates || typeof bridge.setUpdateChannel !== "function") return;
+      const setAlphaUpdates = bridge?.setAlphaUpdates;
+      const setUpdateChannel = bridge?.setUpdateChannel;
+      if (typeof setAlphaUpdates !== "function" || typeof setUpdateChannel !== "function") return;
 
       const nextChannel = track === "nightly" ? "nightly" : "latest";
       const nextAlphaUpdates = track === "nightly";
@@ -253,10 +256,10 @@ function AboutVersionSection() {
       void (async () => {
         try {
           if (nextAlphaUpdates !== alphaUpdates) {
-            await bridge.setAlphaUpdates(nextAlphaUpdates);
+            await setAlphaUpdates(nextAlphaUpdates);
           }
           if (nextChannel !== selectedUpdateChannel) {
-            await bridge.setUpdateChannel(nextChannel);
+            await setUpdateChannel(nextChannel);
           }
         } catch (error) {
           toastManager.add(
@@ -532,6 +535,10 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.showSkillsInSlashMenu !== DEFAULT_UNIFIED_SETTINGS.showSkillsInSlashMenu
         ? ["Show skills in slash menu"]
         : []),
+      ...(settings.showProviderUsageInComposer !==
+      DEFAULT_UNIFIED_SETTINGS.showProviderUsageInComposer
+        ? ["Show usage in chat"]
+        : []),
       ...(settings.enableLegacyTokenStreaming !==
       DEFAULT_UNIFIED_SETTINGS.enableLegacyTokenStreaming
         ? ["Stream token by token"]
@@ -539,6 +546,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.enableProviderUpdateChecks !==
       DEFAULT_UNIFIED_SETTINGS.enableProviderUpdateChecks
         ? ["Provider update checks"]
+        : []),
+      ...(settings.activeTurnMessageBehavior !== DEFAULT_UNIFIED_SETTINGS.activeTurnMessageBehavior
+        ? ["Messages while working"]
         : []),
       ...(isBackgroundActivityDirty ? ["Background activity"] : []),
       ...(settings.defaultThreadEnvMode !== DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode
@@ -580,6 +590,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.confirmQuit,
       settings.confirmThreadArchive,
       settings.confirmThreadDelete,
+      settings.activeTurnMessageBehavior,
       settings.addProjectBaseDirectory,
       settings.defaultThreadEnvMode,
       settings.newWorktreesStartFromOrigin,
@@ -601,6 +612,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.sidebarProjectGroupingMode,
       settings.sidebarThreadPreviewCount,
       settings.showSkillsInSlashMenu,
+      settings.showProviderUsageInComposer,
       settings.timestampFormat,
       settings.wordWrap,
       followSystem,
@@ -677,6 +689,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       wordWrap: DEFAULT_UNIFIED_SETTINGS.wordWrap,
       diffIgnoreWhitespace: DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace,
       showSkillsInSlashMenu: DEFAULT_UNIFIED_SETTINGS.showSkillsInSlashMenu,
+      showProviderUsageInComposer: DEFAULT_UNIFIED_SETTINGS.showProviderUsageInComposer,
       environmentIdentificationMode: DEFAULT_UNIFIED_SETTINGS.environmentIdentificationMode,
       glassOpacity: DEFAULT_UNIFIED_SETTINGS.glassOpacity,
       sidebarThreadPreviewCount: DEFAULT_UNIFIED_SETTINGS.sidebarThreadPreviewCount,
@@ -1886,6 +1899,15 @@ export function GeneralSettingsPanel() {
   const settings = usePrimarySettings();
   const updateSettings = useUpdatePrimarySettings();
   const [backgroundActivityDialogOpen, setBackgroundActivityDialogOpen] = useState(false);
+  const [speechStatus, setSpeechStatus] = useState<DesktopSpeechStatus | null>(null);
+  useEffect(() => {
+    const speech = window.desktopBridge?.speech;
+    if (!speech) return;
+    void speech.getStatus().then(setSpeechStatus);
+    return speech.onEvent((event) => {
+      if (event.type === "status") setSpeechStatus(event.status);
+    });
+  }, []);
   const lastEnabledProjectGroupingMode = useRef<SidebarProjectGroupingMode>(
     readLastEnabledProjectGroupingMode(),
   );
@@ -1948,6 +1970,36 @@ export function GeneralSettingsPanel() {
   return (
     <SettingsPageContainer>
       <SettingsSection title="General">
+        {window.desktopBridge?.speech && speechStatus?.supported ? (
+          <SettingsRow
+            {...searchableSetting("local-voice-input")}
+            description={
+              speechStatus.state === "missing-model"
+                ? "Downloads a 48 MiB English model on first use. Audio stays on this device."
+                : "Moonshine Streaming Tiny is stored locally. Microphone audio is not saved."
+            }
+            control={
+              speechStatus.state === "missing-model" ? (
+                <span className="text-xs text-muted-foreground">Download on first use</span>
+              ) : (
+                <Button
+                  variant="destructive-outline"
+                  size="sm"
+                  disabled={
+                    speechStatus.state === "recording" ||
+                    speechStatus.state === "transcribing" ||
+                    speechStatus.state === "downloading"
+                  }
+                  onClick={() =>
+                    void window.desktopBridge?.speech?.removeModel().then(setSpeechStatus)
+                  }
+                >
+                  Remove model
+                </Button>
+              )
+            }
+          />
+        ) : null}
         <SettingsRow
           {...searchableSetting("project-grouping")}
           description="Combine matching repositories across environments."
@@ -2147,6 +2199,34 @@ export function GeneralSettingsPanel() {
         />
 
         <SettingsRow
+          {...searchableSetting("usage-in-chat")}
+          description="Show remaining session and weekly usage for the current provider next to the chat box, after the first message in a thread."
+          resetAction={
+            settings.showProviderUsageInComposer !==
+            DEFAULT_UNIFIED_SETTINGS.showProviderUsageInComposer ? (
+              <SettingResetButton
+                label="usage in chat"
+                onClick={() =>
+                  updateSettings({
+                    showProviderUsageInComposer:
+                      DEFAULT_UNIFIED_SETTINGS.showProviderUsageInComposer,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.showProviderUsageInComposer}
+              onCheckedChange={(checked) =>
+                updateSettings({ showProviderUsageInComposer: Boolean(checked) })
+              }
+              aria-label="Show usage in chat"
+            />
+          }
+        />
+
+        <SettingsRow
           {...searchableSetting("provider-update-checks")}
           description="Check installed provider CLIs for newer available versions."
           resetAction={
@@ -2170,6 +2250,48 @@ export function GeneralSettingsPanel() {
               }
               aria-label="Check provider versions"
             />
+          }
+        />
+
+        <SettingsRow
+          {...searchableSetting("messages-while-working")}
+          description="Choose whether a message sent during an active turn steers it immediately or waits to run next."
+          resetAction={
+            settings.activeTurnMessageBehavior !==
+            DEFAULT_UNIFIED_SETTINGS.activeTurnMessageBehavior ? (
+              <SettingResetButton
+                label="messages while working"
+                onClick={() =>
+                  updateSettings({
+                    activeTurnMessageBehavior: DEFAULT_UNIFIED_SETTINGS.activeTurnMessageBehavior,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Select
+              value={settings.activeTurnMessageBehavior}
+              onValueChange={(value) => {
+                if (value === "steer" || value === "queue") {
+                  updateSettings({ activeTurnMessageBehavior: value });
+                }
+              }}
+            >
+              <SelectTrigger className="w-full sm:w-40" aria-label="Messages while working">
+                <SelectValue>
+                  {settings.activeTurnMessageBehavior === "queue" ? "Queue" : "Steer"}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                <SelectItem hideIndicator value="steer">
+                  Steer
+                </SelectItem>
+                <SelectItem hideIndicator value="queue">
+                  Queue
+                </SelectItem>
+              </SelectPopup>
+            </Select>
           }
         />
 

@@ -493,12 +493,14 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         undefined,
       );
 
-      // All platforms keep app.asar fully packed; Windows ships the server
-      // tree as the hand-packed server.asar sidecar in extraResources instead
-      // of unpacking thousands of loose files at install time.
-      assert.notProperty(mac, "asarUnpack");
-      assert.notProperty(linux, "asarUnpack");
-      assert.notProperty(win, "asarUnpack");
+      assert.deepStrictEqual(mac.asarUnpack, [
+        "**/node_modules/transcribe-cpp/**/*",
+        "**/node_modules/@transcribe-cpp/**/*",
+        "**/node_modules/koffi/**/*",
+        "**/node_modules/@picovoice/pvrecorder-node/**/*",
+      ]);
+      assert.deepStrictEqual(linux.asarUnpack, mac.asarUnpack);
+      assert.deepStrictEqual(win.asarUnpack, mac.asarUnpack);
       assert.deepStrictEqual(win.extraResources, [
         {
           from: "apps/desktop/prod-resources/resource-monitor",
@@ -530,6 +532,10 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         ],
         iconSize: 80,
         iconTextSize: 12,
+      });
+      assert.deepStrictEqual((mac.mac as Record<string, unknown>).extendInfo, {
+        NSMicrophoneUsageDescription:
+          "T3 Code uses your microphone for local voice input. Audio is processed on this device.",
       });
       // Linux must register the renderer schemes so the generated .desktop
       // entry advertises MimeType=x-scheme-handler/t3code; for OAuth deep links.

@@ -114,6 +114,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/general",
   },
   {
+    id: "local-voice-input",
+    title: "Local voice input",
+    to: "/settings/general",
+    desktopOnly: true,
+  },
+  {
     id: "auto-settle-inactive-threads",
     title: "Auto-settle inactive threads",
     to: "/settings/general",
@@ -139,8 +145,18 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/general",
   },
   {
+    id: "usage-in-chat",
+    title: "Show usage in chat",
+    to: "/settings/general",
+  },
+  {
     id: "provider-update-checks",
     title: "Provider update checks",
+    to: "/settings/general",
+  },
+  {
+    id: "messages-while-working",
+    title: "Messages while working",
     to: "/settings/general",
   },
   {
