@@ -790,6 +790,21 @@ export const DESKTOP_FILE_EXCLUSIONS = [
   // so the SDK's optional platform packages (each a ~200MB bundled executable)
   // are dead weight. The trailing dash keeps the SDK's own JS package.
   "!**/node_modules/@anthropic-ai/claude-agent-sdk-*/**/*",
+  // The microphone package ships source maps, TypeScript sources, and
+  // non-Windows recorder binaries. None are needed by the packaged runtime.
+  "!**/node_modules/@picovoice/pvrecorder-node/.eslintignore",
+  "!**/node_modules/@picovoice/pvrecorder-node/.eslintrc.js",
+  "!**/node_modules/@picovoice/pvrecorder-node/.prettierrc",
+  "!**/node_modules/@picovoice/pvrecorder-node/copy.js",
+  "!**/node_modules/@picovoice/pvrecorder-node/jest.config.js",
+  "!**/node_modules/@picovoice/pvrecorder-node/src/**",
+  "!**/node_modules/@picovoice/pvrecorder-node/dist/**/*.map",
+  "!**/node_modules/@picovoice/pvrecorder-node/dist/types/**",
+  "!**/node_modules/@picovoice/pvrecorder-node/lib/linux/**",
+  "!**/node_modules/@picovoice/pvrecorder-node/lib/mac/**",
+  "!**/node_modules/@picovoice/pvrecorder-node/lib/raspberry-pi/**",
+  "!**/node_modules/@picovoice/pvrecorder-node/lib/windows/arm64/**",
+  "!**/node_modules/@transcribe-cpp/*/licenses/**",
   // Windows stages the server sidecar below prod-resources so electron-builder
   // can copy it using project-relative extraResources matchers. Keep those
   // staging inputs out of app.asar; they are emitted once at resources/.
@@ -839,7 +854,10 @@ export function resolveWindowsServerAsarIgnoreGlobs(arch: typeof BuildArch.Type)
   ];
 }
 
-export const WINDOWS_PACKAGED_PAYLOAD_FILE_LIMIT = 80;
+// The Windows app now includes the native microphone/transcription runtime.
+// Keep a ceiling as a packaging regression guard, but account for the small
+// set of platform-native files that feature requires.
+export const WINDOWS_PACKAGED_PAYLOAD_FILE_LIMIT = 100;
 export const WINDOWS_SERVER_RESOURCE_SOURCE_DIR = "apps/desktop/prod-resources/windows-server";
 export const WINDOWS_SERVER_EXTRA_RESOURCES = [
   {
@@ -2111,12 +2129,11 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
     artifactName: "Flux-${version}-${arch}.${ext}",
     electronLanguages: [...DESKTOP_ELECTRON_LANGUAGES],
     files: [...DESKTOP_FILE_EXCLUSIONS, ...(platform === "mac" ? MAC_FILE_EXCLUSIONS : [])],
-    asarUnpack: [
-      "**/node_modules/transcribe-cpp/**/*",
-      "**/node_modules/@transcribe-cpp/**/*",
-      "**/node_modules/koffi/**/*",
-      "**/node_modules/@picovoice/pvrecorder-node/**/*",
-    ],
+    // Let electron-builder's native-module detection unpack only the files
+    // that require real filesystem paths. An explicit package-wide unpack
+    // glob would also extract every source, map, license, and foreign-platform
+    // binary from the transcription dependencies.
+    asarUnpack: [],
     directories: {
       buildResources: "apps/desktop/resources",
     },

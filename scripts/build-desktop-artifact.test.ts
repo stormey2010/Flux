@@ -493,12 +493,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         undefined,
       );
 
-      assert.deepStrictEqual(mac.asarUnpack, [
-        "**/node_modules/transcribe-cpp/**/*",
-        "**/node_modules/@transcribe-cpp/**/*",
-        "**/node_modules/koffi/**/*",
-        "**/node_modules/@picovoice/pvrecorder-node/**/*",
-      ]);
+      assert.deepStrictEqual(mac.asarUnpack, []);
       assert.deepStrictEqual(linux.asarUnpack, mac.asarUnpack);
       assert.deepStrictEqual(win.asarUnpack, mac.asarUnpack);
       assert.deepStrictEqual(win.extraResources, [
