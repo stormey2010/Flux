@@ -19,6 +19,7 @@ export function createInitialDesktopUpdateState(
   currentVersion: string,
   runtimeInfo: DesktopRuntimeInfo,
   channel: DesktopUpdateChannel,
+  alphaUpdates = false,
 ): DesktopUpdateState {
   return {
     enabled: false,
@@ -36,6 +37,7 @@ export function createInitialDesktopUpdateState(
     message: null,
     errorContext: null,
     canRetry: false,
+    alphaUpdates,
     currentCommitHash: null,
     mainCommitHash: null,
     mainCommitMessage: null,
@@ -133,6 +135,9 @@ export function reduceDesktopUpdateStateOnNoUpdate(
     status: "up-to-date",
     availableVersion: null,
     downloadedVersion: null,
+    mainCommitHash: state.alphaUpdates ? null : state.mainCommitHash,
+    mainCommitMessage: state.alphaUpdates ? null : state.mainCommitMessage,
+    mainCommitDate: state.alphaUpdates ? null : state.mainCommitDate,
     releaseNotes: [],
     downloadPercent: null,
     checkedAt,

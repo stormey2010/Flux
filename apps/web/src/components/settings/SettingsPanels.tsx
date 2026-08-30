@@ -232,11 +232,35 @@ function AboutVersionTitle() {
 function AboutVersionSection() {
   const updateState = useDesktopUpdateState();
   const [isChangingUpdateChannel, setIsChangingUpdateChannel] = useState(false);
+  const [isChangingAlphaUpdates, setIsChangingAlphaUpdates] = useState(false);
   const [isUpdateActionPending, setIsUpdateActionPending] = useState(false);
 
   const hasDesktopBridge = typeof window !== "undefined" && Boolean(window.desktopBridge);
   const selectedUpdateChannel = updateState?.channel ?? "latest";
   const selectedHostedAppChannel = hasDesktopBridge ? null : HOSTED_APP_CHANNEL;
+  const alphaUpdates = updateState?.alphaUpdates === true;
+
+  const handleAlphaUpdatesChange = useCallback(
+    (enabled: boolean) => {
+      const bridge = window.desktopBridge;
+      if (!bridge?.setAlphaUpdates || enabled === alphaUpdates) return;
+
+      setIsChangingAlphaUpdates(true);
+      void bridge
+        .setAlphaUpdates(enabled)
+        .catch((error: unknown) => {
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: "Could not change Alpha updates",
+              description: error instanceof Error ? error.message : "Alpha update change failed.",
+            }),
+          );
+        })
+        .finally(() => setIsChangingAlphaUpdates(false));
+    },
+    [alphaUpdates],
+  );
 
   const handleUpdateChannelChange = useCallback(
     (channel: DesktopUpdateChannel) => {
@@ -397,36 +421,50 @@ function AboutVersionSection() {
         }
       />
       {hasDesktopBridge ? (
-        <SettingsRow
-          title="Update track"
-          description="Stable follows full releases. Nightly follows the nightly desktop channel and can switch back to stable immediately."
-          control={
-            <Select
-              value={selectedUpdateChannel}
-              onValueChange={(value) => {
-                handleUpdateChannelChange(value as DesktopUpdateChannel);
-              }}
-            >
-              <SelectTrigger
-                className="w-full sm:w-40"
-                aria-label="Update track"
-                disabled={isChangingUpdateChannel}
+        <>
+          <SettingsRow
+            title="Update track"
+            description="Stable follows full releases. Nightly follows the nightly desktop channel and can switch back to stable immediately."
+            control={
+              <Select
+                value={selectedUpdateChannel}
+                onValueChange={(value) => {
+                  handleUpdateChannelChange(value as DesktopUpdateChannel);
+                }}
               >
-                <SelectValue>
-                  {selectedUpdateChannel === "nightly" ? "Nightly" : "Stable"}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectPopup align="end" alignItemWithTrigger={false}>
-                <SelectItem hideIndicator value="latest">
-                  Stable
-                </SelectItem>
-                <SelectItem hideIndicator value="nightly">
-                  Nightly
-                </SelectItem>
-              </SelectPopup>
-            </Select>
-          }
-        />
+                <SelectTrigger
+                  className="w-full sm:w-40"
+                  aria-label="Update track"
+                  disabled={isChangingUpdateChannel}
+                >
+                  <SelectValue>
+                    {selectedUpdateChannel === "nightly" ? "Nightly" : "Stable"}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectPopup align="end" alignItemWithTrigger={false}>
+                  <SelectItem hideIndicator value="latest">
+                    Stable
+                  </SelectItem>
+                  <SelectItem hideIndicator value="nightly">
+                    Nightly
+                  </SelectItem>
+                </SelectPopup>
+              </Select>
+            }
+          />
+          <SettingsRow
+            title="Alpha updates"
+            description="Treats newer packaged builds from master as updates. Leave off to receive release-only updates."
+            control={
+              <Switch
+                checked={alphaUpdates}
+                onCheckedChange={(checked) => handleAlphaUpdatesChange(Boolean(checked))}
+                disabled={isChangingAlphaUpdates}
+                aria-label="Enable Alpha updates"
+              />
+            }
+          />
+        </>
       ) : selectedHostedAppChannel ? (
         <SettingsRow
           title="Update track"

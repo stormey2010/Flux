@@ -113,6 +113,7 @@ describe("DesktopSettings", () => {
         tailscaleServePort: 443,
         updateChannel: "nightly",
         updateChannelConfiguredByUser: false,
+        alphaUpdates: false,
         wslBackendEnabled: false,
         wslOnly: false,
         wslDistro: null,
@@ -131,6 +132,7 @@ describe("DesktopSettings", () => {
           tailscaleServePort: 8443,
           updateChannel: "latest",
           updateChannelConfiguredByUser: true,
+          alphaUpdates: false,
         });
 
         assert.deepEqual(yield* settings.load, {
@@ -142,6 +144,7 @@ describe("DesktopSettings", () => {
           tailscaleServePort: 8443,
           updateChannel: "latest",
           updateChannelConfiguredByUser: true,
+          alphaUpdates: false,
           wslBackendEnabled: false,
           wslOnly: false,
           wslDistro: null,
@@ -162,6 +165,10 @@ describe("DesktopSettings", () => {
         assert.isTrue(updateChannel.changed);
         assert.equal(updateChannel.settings.updateChannel, "nightly");
         assert.equal(updateChannel.settings.updateChannelConfiguredByUser, true);
+
+        const alphaUpdates = yield* settings.setAlphaUpdates(true);
+        assert.isTrue(alphaUpdates.changed);
+        assert.isTrue(alphaUpdates.settings.alphaUpdates);
       }),
     ),
   );
@@ -249,6 +256,7 @@ describe("DesktopSettings", () => {
           tailscaleServePort: 8443,
           updateChannel: "latest",
           updateChannelConfiguredByUser: false,
+          alphaUpdates: false,
           wslBackendEnabled: false,
           wslOnly: false,
           wslDistro: null,
@@ -305,6 +313,7 @@ describe("DesktopSettings", () => {
             tailscaleServePort: 8443,
             updateChannel: "nightly",
             updateChannelConfiguredByUser: true,
+            alphaUpdates: false,
             wslBackendEnabled: false,
             wslOnly: false,
             wslDistro: null,
@@ -353,6 +362,7 @@ describe("DesktopSettings", () => {
           tailscaleServePort: 443,
           updateChannel: "nightly",
           updateChannelConfiguredByUser: false,
+          alphaUpdates: false,
           wslBackendEnabled: false,
           wslOnly: false,
           wslDistro: null,
@@ -370,6 +380,7 @@ describe("DesktopSettings", () => {
           serverExposureMode: "local-only",
           updateChannel: "latest",
           updateChannelConfiguredByUser: true,
+          alphaUpdates: false,
         });
 
         assert.deepEqual(yield* settings.load, {
@@ -381,6 +392,7 @@ describe("DesktopSettings", () => {
           tailscaleServePort: 443,
           updateChannel: "latest",
           updateChannelConfiguredByUser: true,
+          alphaUpdates: false,
           wslBackendEnabled: false,
           wslOnly: false,
           wslDistro: null,
@@ -408,6 +420,7 @@ describe("DesktopSettings", () => {
           tailscaleServePort: 443,
           updateChannel: "latest",
           updateChannelConfiguredByUser: false,
+          alphaUpdates: false,
           wslBackendEnabled: false,
           wslOnly: false,
           wslDistro: null,

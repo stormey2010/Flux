@@ -50,7 +50,7 @@ const DEFAULT_UPDATE_BRANCH = "master";
 const COMMIT_HASH_PATTERN = /^[0-9a-f]{7,40}$/i;
 const COMMIT_HASH_DISPLAY_LENGTH = 12;
 
-type UpdateAction = "check" | "download" | "install" | "channel";
+type UpdateAction = "check" | "download" | "install" | "channel" | "alpha";
 
 const AppUpdateYmlConfig = Schema.Record(Schema.String, Schema.String);
 type AppUpdateYmlConfig = typeof AppUpdateYmlConfig.Type;
@@ -95,7 +95,7 @@ const currentIsoTimestamp = DateTime.now.pipe(Effect.map(DateTime.formatIso));
 export class DesktopUpdateActionInProgressError extends Schema.TaggedErrorClass<DesktopUpdateActionInProgressError>()(
   "DesktopUpdateActionInProgressError",
   {
-    action: Schema.Literals(["check", "download", "install", "channel"]),
+    action: Schema.Literals(["check", "download", "install", "channel", "alpha"]),
     requestedChannel: DesktopUpdateChannelSchema,
   },
 ) {
@@ -113,6 +113,18 @@ export class DesktopUpdateChannelPersistenceError extends Schema.TaggedErrorClas
 ) {
   override get message(): string {
     return `Failed to persist the ${this.channel} desktop update channel.`;
+  }
+}
+
+export class DesktopUpdateAlphaPersistenceError extends Schema.TaggedErrorClass<DesktopUpdateAlphaPersistenceError>()(
+  "DesktopUpdateAlphaPersistenceError",
+  {
+    enabled: Schema.Boolean,
+    cause: Schema.instanceOf(DesktopAppSettings.DesktopSettingsWriteError),
+  },
+) {
+  override get message(): string {
+    return `Failed to persist Alpha updates ${this.enabled ? "enablement" : "disablement"}.`;
   }
 }
 
@@ -183,6 +195,12 @@ export class DesktopUpdates extends Context.Service<
     readonly setChannel: (
       channel: DesktopUpdateChannel,
     ) => Effect.Effect<DesktopUpdateState, DesktopUpdateSetChannelError>;
+    readonly setAlphaUpdates: (
+      enabled: boolean,
+    ) => Effect.Effect<
+      DesktopUpdateState,
+      DesktopUpdateAlphaPersistenceError | DesktopUpdateActionInProgressError
+    >;
     readonly check: (reason: string) => Effect.Effect<DesktopUpdateCheckResult>;
     readonly download: Effect.Effect<DesktopUpdateActionResult>;
     readonly install: Effect.Effect<DesktopUpdateActionResult>;
@@ -215,9 +233,15 @@ function createBaseUpdateState(
   enabled: boolean,
   environment: DesktopEnvironment.DesktopEnvironment["Service"],
   currentCommitHash: string | null,
+  alphaUpdates: boolean,
 ): DesktopUpdateState {
   return {
-    ...createInitialDesktopUpdateState(environment.appVersion, environment.runtimeInfo, channel),
+    ...createInitialDesktopUpdateState(
+      environment.appVersion,
+      environment.runtimeInfo,
+      channel,
+      alphaUpdates,
+    ),
     enabled,
     status: enabled ? "idle" : "disabled",
     currentCommitHash,
@@ -329,6 +353,7 @@ export const make = Effect.gen(function* () {
       environment.appVersion,
       environment.runtimeInfo,
       environment.defaultDesktopSettings.updateChannel,
+      environment.defaultDesktopSettings.alphaUpdates,
     ),
     currentCommitHash,
   });
@@ -389,6 +414,18 @@ export const make = Effect.gen(function* () {
       mainCommitHash: commit.hash,
       mainCommitMessage: commit.message,
       mainCommitDate: commit.date,
+      ...(state.alphaUpdates && currentCommitHash !== null && currentCommitHash !== commit.hash
+        ? {
+            status: "available" as const,
+            availableVersion: `master-${commit.hash}`,
+            downloadedVersion: null,
+            releaseNotes: [],
+            downloadPercent: null,
+            message: null,
+            errorContext: null,
+            canRetry: false,
+          }
+        : {}),
     }));
     if (currentCommitHash !== null && currentCommitHash !== commit.hash) {
       yield* logUpdaterInfo("main branch has a newer commit", {
@@ -447,15 +484,21 @@ export const make = Effect.gen(function* () {
 
   const applyAutoUpdaterChannel = Effect.fn("desktop.updates.applyAutoUpdaterChannel")(function* (
     channel: DesktopUpdateChannel,
+    alphaUpdates: boolean,
   ) {
     yield* Effect.annotateCurrentSpan({ channel });
-    const allowsPrerelease = channel === "nightly";
-    yield* electronUpdater.setChannel(channel);
+    // Alpha builds are packaged as rolling nightly builds. Keep the user's
+    // stable/nightly preference visible in state, but use the nightly feed for
+    // the opt-in master-build path.
+    const updaterChannel = alphaUpdates ? "nightly" : channel;
+    const allowsPrerelease = updaterChannel === "nightly";
+    yield* electronUpdater.setChannel(updaterChannel);
     yield* electronUpdater.setAllowPrerelease(allowsPrerelease);
     yield* electronUpdater.setAllowDowngrade(allowsPrerelease);
     yield* electronUpdater.setFullChangelog(allowsPrerelease);
     yield* logUpdaterInfo("using update channel", {
       channel,
+      updaterChannel,
       allowPrerelease: allowsPrerelease,
       allowDowngrade: allowsPrerelease,
       fullChangelog: allowsPrerelease,
@@ -696,10 +739,11 @@ export const make = Effect.gen(function* () {
       Effect.flatMap(
         Effect.fn("desktop.updates.applyUpdateAvailable")(function* (info) {
           const state = yield* Ref.get(updateStateRef);
-          if (resolveDefaultDesktopUpdateChannel(info.version) !== state.channel) {
+          const expectedChannel = state.alphaUpdates ? "nightly" : state.channel;
+          if (resolveDefaultDesktopUpdateChannel(info.version) !== expectedChannel) {
             yield* logUpdaterInfo("ignoring update that does not match selected channel", {
               version: info.version,
-              channel: state.channel,
+              channel: expectedChannel,
             });
             const checkedAt = yield* currentIsoTimestamp;
             yield* setState(reduceDesktopUpdateStateOnNoUpdate(state, checkedAt));
@@ -859,7 +903,13 @@ export const make = Effect.gen(function* () {
       const settings = yield* desktopSettings.get;
       const enabled = yield* shouldEnableAutoUpdates;
       yield* setState(
-        createBaseUpdateState(settings.updateChannel, enabled, environment, currentCommitHash),
+        createBaseUpdateState(
+          settings.updateChannel,
+          enabled,
+          environment,
+          currentCommitHash,
+          settings.alphaUpdates,
+        ),
       );
       if (!enabled) {
         return;
@@ -868,7 +918,7 @@ export const make = Effect.gen(function* () {
 
       yield* electronUpdater.setAutoDownload(false);
       yield* electronUpdater.setAutoInstallOnAppQuit(false);
-      yield* applyAutoUpdaterChannel(settings.updateChannel);
+      yield* applyAutoUpdaterChannel(settings.updateChannel, settings.alphaUpdates);
       yield* electronUpdater.setDisableDifferentialDownload(
         isArm64HostRunningIntelBuild(environment.runtimeInfo),
       );
@@ -932,14 +982,20 @@ export const make = Effect.gen(function* () {
 
         const enabled = yield* shouldEnableAutoUpdates;
         yield* setState(
-          createBaseUpdateState(nextChannel, enabled, environment, currentCommitHash),
+          createBaseUpdateState(
+            nextChannel,
+            enabled,
+            environment,
+            currentCommitHash,
+            state.alphaUpdates === true,
+          ),
         );
 
         if (!enabled || !(yield* Ref.get(updaterConfiguredRef))) {
           return yield* Ref.get(updateStateRef);
         }
 
-        yield* applyAutoUpdaterChannel(nextChannel);
+        yield* applyAutoUpdaterChannel(nextChannel, state.alphaUpdates === true);
         const allowDowngrade = yield* electronUpdater.allowDowngrade;
         yield* electronUpdater.setAllowDowngrade(true);
         yield* checkForUpdates("channel-change", "held").pipe(
@@ -947,6 +1003,52 @@ export const make = Effect.gen(function* () {
         );
         return yield* Ref.get(updateStateRef);
       }).pipe(Effect.ensuring(finishUpdateAction("channel")));
+    }),
+    setAlphaUpdates: Effect.fn("desktop.updates.setAlphaUpdates")(function* (enabled: boolean) {
+      const activeAction = yield* Ref.modify(activeUpdateActionRef, (active) =>
+        Option.isSome(active)
+          ? [active, active]
+          : [Option.none<UpdateAction>(), Option.some("alpha")],
+      );
+      if (Option.isSome(activeAction)) {
+        return yield* new DesktopUpdateActionInProgressError({
+          action: activeAction.value,
+          requestedChannel: "latest",
+        });
+      }
+
+      return yield* Effect.gen(function* () {
+        const state = yield* Ref.get(updateStateRef);
+        if (state.alphaUpdates === enabled) return state;
+
+        yield* desktopSettings
+          .setAlphaUpdates(enabled)
+          .pipe(
+            Effect.mapError((cause) => new DesktopUpdateAlphaPersistenceError({ enabled, cause })),
+          );
+        const isSyntheticMainUpdate = state.availableVersion?.startsWith("master-") === true;
+        yield* setState({
+          ...state,
+          alphaUpdates: enabled,
+          ...(isSyntheticMainUpdate && !enabled
+            ? {
+                status: "idle" as const,
+                availableVersion: null,
+                releaseNotes: [],
+                downloadPercent: null,
+                message: null,
+                errorContext: null,
+                canRetry: false,
+              }
+            : {}),
+        });
+
+        if (yield* Ref.get(updaterConfiguredRef)) {
+          yield* applyAutoUpdaterChannel(state.channel, enabled);
+          yield* checkForUpdates("alpha-toggle", "held");
+        }
+        return yield* Ref.get(updateStateRef);
+      }).pipe(Effect.ensuring(finishUpdateAction("alpha")));
     }),
     check: Effect.fn("desktop.updates.check")(function* (reason: string) {
       yield* Effect.annotateCurrentSpan({ reason });

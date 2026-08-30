@@ -5,6 +5,8 @@ on:
     tags:
       - "v*.*.*"
       - "!v*-nightly.*"
+    branches:
+      - master
   schedule:
     # Off minute zero: GitHub delays scheduled runs most at the top of the hour.
     - cron: "7 */3 * * *"
@@ -30,7 +32,7 @@ on:
 # newest-wins single slot, so a queued stable tag can never be silently
 # dropped. Queued nightlies with no new commits skip via check_changes.
 concurrency:
-  group: release-${{ (github.event_name == 'schedule' || inputs.channel == 'nightly') && 'nightly' || 'stable' }}
+  group: release-${{ (github.event_name == 'schedule' || inputs.channel == 'nightly' || (github.event_name == 'push' && github.ref_type == 'branch')) && 'nightly' || 'stable' }}
   cancel-in-progress: false
   queue: max
 
@@ -122,7 +124,7 @@ jobs:
           NIGHTLY_SHA: ${{ github.sha }}
           NIGHTLY_RUN_NUMBER: ${{ github.run_number }}
         run: |
-          if [[ "${GITHUB_EVENT_NAME}" == "schedule" || ( "${GITHUB_EVENT_NAME}" == "workflow_dispatch" && "${DISPATCH_CHANNEL:-stable}" == "nightly" ) ]]; then
+          if [[ "${GITHUB_EVENT_NAME}" == "schedule" || ( "${GITHUB_EVENT_NAME}" == "workflow_dispatch" && "${DISPATCH_CHANNEL:-stable}" == "nightly" ) || ( "${GITHUB_EVENT_NAME}" == "push" && "${GITHUB_REF_TYPE}" == "branch" ) ]]; then
             nightly_date="$(date -u -d "$NIGHTLY_DATE" +%Y%m%d)"
 
             node scripts/resolve-nightly-release.ts \

@@ -197,6 +197,12 @@ function makeHarness(options: UpdatesHarnessOptions = {}) {
                     }),
                   ),
                 ),
+          setAlphaUpdates: (enabled) =>
+            Effect.sync(() => {
+              const changed = testSettings.alphaUpdates !== enabled;
+              testSettings = { ...testSettings, alphaUpdates: enabled };
+              return { settings: testSettings, changed };
+            }),
           setWslBackendEnabled: () => Effect.die("unexpected WSL backend toggle"),
           setWslDistro: () => Effect.die("unexpected WSL distro change"),
           setWslOnly: () => Effect.die("unexpected WSL-only toggle"),
@@ -346,6 +352,8 @@ describe("DesktopUpdates", () => {
       Effect.gen(function* () {
         const updates = yield* DesktopUpdates.DesktopUpdates;
         yield* updates.configure;
+        const alphaState = yield* updates.setAlphaUpdates(true);
+        assert.isTrue(alphaState.alphaUpdates);
         const result = yield* updates.check("manual");
 
         assert.isTrue(result.checked);
@@ -353,6 +361,8 @@ describe("DesktopUpdates", () => {
         assert.equal(result.state.mainCommitHash, "222222222222");
         assert.equal(result.state.mainCommitMessage, "feat: update the updater");
         assert.equal(result.state.mainCommitDate, "2026-08-30T00:00:00Z");
+        assert.equal(result.state.status, "available");
+        assert.equal(result.state.availableVersion, "master-222222222222");
       }),
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
   });

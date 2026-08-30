@@ -212,6 +212,8 @@ export interface DesktopUpdateState {
   message: string | null;
   errorContext: "check" | "download" | "install" | null;
   canRetry: boolean;
+  /** When enabled, the latest packaged build from master is also eligible. */
+  alphaUpdates?: boolean;
   /** Commit metadata is optional so older desktop/web peers remain compatible. */
   currentCommitHash?: string | null;
   mainCommitHash?: string | null;
@@ -245,6 +247,7 @@ export const DesktopUpdateStateSchema = Schema.Struct({
   message: Schema.NullOr(Schema.String),
   errorContext: Schema.NullOr(Schema.Literals(["check", "download", "install"])),
   canRetry: Schema.Boolean,
+  alphaUpdates: Schema.optional(Schema.Boolean),
   currentCommitHash: Schema.optional(Schema.NullOr(Schema.String)),
   mainCommitHash: Schema.optional(Schema.NullOr(Schema.String)),
   mainCommitMessage: Schema.optional(Schema.NullOr(Schema.String)),
@@ -1228,6 +1231,8 @@ export interface DesktopBridge {
   onWindowFullscreenStateChange: (listener: (fullscreen: boolean) => void) => () => void;
   getUpdateState: () => Promise<DesktopUpdateState>;
   setUpdateChannel: (channel: DesktopUpdateChannel) => Promise<DesktopUpdateState>;
+  /** Optional while older desktop shells host a newer web client. */
+  setAlphaUpdates?: (enabled: boolean) => Promise<DesktopUpdateState>;
   checkForUpdate: () => Promise<DesktopUpdateCheckResult>;
   downloadUpdate: () => Promise<DesktopUpdateActionResult>;
   installUpdate: () => Promise<DesktopUpdateActionResult>;

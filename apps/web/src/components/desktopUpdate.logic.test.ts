@@ -38,13 +38,25 @@ describe("desktop update button state", () => {
   it("shows a source update when Flux main moved ahead of the installed build", () => {
     const state: DesktopUpdateState = {
       ...baseState,
+      alphaUpdates: true,
       currentCommitHash: "111111111111",
       mainCommitHash: "222222222222",
     };
     expect(hasNewerMainCommit(state)).toBe(true);
     expect(shouldShowDesktopUpdateButton(state)).toBe(true);
-    expect(resolveDesktopUpdateButtonAction(state)).toBe("none");
+    expect(resolveDesktopUpdateButtonAction(state)).toBe("download");
     expect(getDesktopUpdateButtonTooltip(state)).toContain("222222222222");
+  });
+
+  it("keeps source-only changes hidden on the release-only track", () => {
+    const state: DesktopUpdateState = {
+      ...baseState,
+      currentCommitHash: "111111111111",
+      mainCommitHash: "222222222222",
+    };
+    expect(hasNewerMainCommit(state)).toBe(true);
+    expect(shouldShowDesktopUpdateButton(state)).toBe(false);
+    expect(resolveDesktopUpdateButtonAction(state)).toBe("none");
   });
 
   it("shows a download action when an update is available", () => {

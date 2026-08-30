@@ -43,6 +43,9 @@ export function resolveDesktopUpdateButtonAction(
   if (state.status === "available") {
     return "download";
   }
+  if (state.alphaUpdates && hasNewerMainCommit(state)) {
+    return "download";
+  }
   if (state.status === "error") {
     if (state.errorContext === "download" && state.availableVersion) {
       return "download";
@@ -58,7 +61,10 @@ export function shouldShowDesktopUpdateButton(state: DesktopUpdateState | null):
   if (state.status === "downloading") {
     return true;
   }
-  return resolveDesktopUpdateButtonAction(state) !== "none" || hasNewerMainCommit(state);
+  return (
+    resolveDesktopUpdateButtonAction(state) !== "none" ||
+    (state.alphaUpdates === true && hasNewerMainCommit(state))
+  );
 }
 
 export function shouldShowArm64IntelBuildWarning(state: DesktopUpdateState | null): boolean {
@@ -108,7 +114,7 @@ export function getDesktopUpdateButtonTooltip(state: DesktopUpdateState): string
     }
     return state.message ?? "Update failed";
   }
-  if (hasNewerMainCommit(state)) {
+  if (state.alphaUpdates && hasNewerMainCommit(state)) {
     return `New main build available (${state.mainCommitHash?.slice(0, 12)}).`;
   }
   return "Up to date";
