@@ -5340,6 +5340,8 @@ function ChatViewContent(props: ChatViewProps) {
     },
   ) => {
     e?.preventDefault();
+    const canQueueWhileRunning =
+      phase === "running" && settings.activeTurnMessageBehavior === "queue";
     const notifyDirectAnnotationAttached = () => {
       if (!directAnnotation) return;
       toastManager.add(
@@ -5352,7 +5354,7 @@ function ChatViewContent(props: ChatViewProps) {
     };
     if (
       !activeThread ||
-      isSendBusy ||
+      (isSendBusy && !canQueueWhileRunning) ||
       isConnecting ||
       threadDetailLoading ||
       sendInFlightRef.current ||

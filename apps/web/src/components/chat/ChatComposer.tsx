@@ -1397,8 +1397,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     [activePendingIsResponding, activePendingProgress, activePendingResolvedAnswers],
   );
   const collapsedComposerPrimaryActionDisabled =
-    phase === "running" ||
-    isSendBusy ||
+    (phase === "running" && settings.activeTurnMessageBehavior !== "queue") ||
+    (isSendBusy && !(phase === "running" && settings.activeTurnMessageBehavior === "queue")) ||
     isSendDisabled ||
     isConnecting ||
     noProviderAvailable ||

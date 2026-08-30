@@ -80,6 +80,8 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
     : undefined;
   const environmentIdentificationMode = useEnvironmentIdentificationMode();
   const isSendDisabled = sendDisabledReason !== null;
+  const canQueueWhileRunning = isRunning && activeTurnMessageBehavior === "queue";
+  const isSendBusyForCurrentAction = isSendBusy && !canQueueWhileRunning;
   const stageBackdropVariant = useSidebarStageBackdropVariant(
     environmentIdentificationMode === "artwork",
   );
@@ -171,7 +173,9 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
             compact ? "h-9 px-3 sm:h-8" : "h-9 px-4 sm:h-8",
           )}
           {...pointerFocusProps}
-          disabled={isSendBusy || isSendDisabled || isConnecting || isEnvironmentUnavailable}
+          disabled={
+            isSendBusyForCurrentAction || isSendDisabled || isConnecting || isEnvironmentUnavailable
+          }
         >
           {isConnecting || isSendBusy ? "Sending..." : "Refine"}
         </Button>
@@ -198,7 +202,12 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
                 className="h-9 rounded-l-none rounded-r-full border-l-message-action-foreground/20 bg-message-action px-2 text-message-action-foreground hover:bg-message-action-hover sm:h-8"
                 aria-label="Implementation actions"
                 {...pointerFocusProps}
-                disabled={isSendBusy || isSendDisabled || isConnecting || isEnvironmentUnavailable}
+                disabled={
+                  isSendBusyForCurrentAction ||
+                  isSendDisabled ||
+                  isConnecting ||
+                  isEnvironmentUnavailable
+                }
               />
             }
           >
@@ -228,7 +237,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
       )}
       {...pointerFocusProps}
       disabled={
-        isSendBusy ||
+        isSendBusyForCurrentAction ||
         isSendDisabled ||
         isConnecting ||
         isEnvironmentUnavailable ||
@@ -243,7 +252,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
               ? "Connecting"
               : isPreparingWorktree
                 ? "Preparing worktree"
-                : isSendBusy
+                : isSendBusyForCurrentAction
                   ? "Sending"
                   : isRunning
                     ? activeTurnMessageBehavior === "queue"
@@ -257,7 +266,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
           <StageBackdropButtonArt variant={stageBackdropVariant} />
         </span>
       ) : null}
-      {isConnecting || isSendBusy ? (
+      {isConnecting || isSendBusyForCurrentAction ? (
         <Spinner className="size-3.5" aria-hidden="true" />
       ) : (
         <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">

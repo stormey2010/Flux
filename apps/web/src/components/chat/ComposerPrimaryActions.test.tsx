@@ -275,6 +275,31 @@ describe("ComposerPrimaryActions", () => {
     expect(markup).toContain('aria-label="Queue message"');
   });
 
+  it("keeps queue available while the previous send is being projected", () => {
+    const markup = renderToStaticMarkup(
+      createElement(ComposerPrimaryActions, {
+        compact: true,
+        pendingAction: null,
+        isRunning: true,
+        showPlanFollowUpPrompt: false,
+        promptHasText: true,
+        isSendBusy: true,
+        sendDisabledReason: null,
+        isConnecting: false,
+        isEnvironmentUnavailable: false,
+        isPreparingWorktree: false,
+        hasSendableContent: true,
+        activeTurnMessageBehavior: "queue",
+        onPreviousPendingQuestion: () => {},
+        onInterrupt: () => {},
+        onImplementPlanInNewThread: () => {},
+      }),
+    );
+
+    expect(markup).not.toContain('disabled=""');
+    expect(markup).toContain('aria-label="Queue message"');
+  });
+
   it("renders send alongside stop while running", () => {
     const markup = renderRunningActions(true);
 
