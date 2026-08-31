@@ -2695,6 +2695,13 @@ function ChatViewContent(props: ChatViewProps) {
     feedbackSubmissions,
     optimisticUserMessages,
   ]);
+  const queuedMessages = useMemo(
+    () =>
+      timelineMessages
+        .filter((message) => message.role === "user" && message.deliveryState === "queued")
+        .map((message) => ({ id: message.id, text: message.text })),
+    [timelineMessages],
+  );
   const timelineEntries = useMemo(
     () =>
       deriveTimelineEntries(
@@ -7011,9 +7018,6 @@ function ChatViewContent(props: ChatViewProps) {
                 onOpenTurnDiff={onOpenTurnDiff}
                 revertTurnCountByUserMessageId={revertTurnCountByUserMessageId}
                 onRevertUserMessage={onRevertUserMessage}
-                onCancelQueuedMessage={onCancelQueuedMessage}
-                onSteerQueuedMessage={onSteerQueuedMessage}
-                canSteerQueuedMessages={activeRunningTurnId !== null}
                 isRevertingCheckpoint={isRevertingCheckpoint}
                 onImageExpand={onExpandTimelineImage}
                 markdownCwd={gitCwd ?? undefined}
@@ -7151,6 +7155,10 @@ function ChatViewContent(props: ChatViewProps) {
                             activeProposedPlan={activeProposedPlan}
                             activeTasksProgress={activeComposerTasksProgress}
                             activeTaskSteps={activeComposerTaskSteps}
+                            queuedMessages={queuedMessages}
+                            canSteerQueuedMessages={activeRunningTurnId !== null}
+                            onCancelQueuedMessage={onCancelQueuedMessage}
+                            onSteerQueuedMessage={onSteerQueuedMessage}
                             runtimeMode={runtimeMode}
                             interactionMode={interactionMode}
                             lockedProvider={lockedProvider}

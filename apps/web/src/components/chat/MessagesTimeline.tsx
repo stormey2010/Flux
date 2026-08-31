@@ -15,8 +15,6 @@ import {
 
 const EMPTY_AGENT_PANEL_MODEL = emptyAgentPanelModel();
 const NOOP_OPEN_AGENTS = () => {};
-const NOOP_CANCEL_QUEUED_MESSAGE = (_messageId: MessageId) => {};
-const NOOP_STEER_QUEUED_MESSAGE = (_messageId: MessageId) => {};
 import { resolveChatListAnchoredEndSpace } from "@t3tools/shared/chatList";
 import {
   createContext,
@@ -148,9 +146,6 @@ interface TimelineRowSharedState {
   skills: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
   activeThreadEnvironmentId: EnvironmentId;
   onRevertUserMessage: (messageId: MessageId) => void;
-  onCancelQueuedMessage: (messageId: MessageId) => void;
-  onSteerQueuedMessage: (messageId: MessageId) => void;
-  canSteerQueuedMessages: boolean;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
   onToggleTurnFold: (turnId: TurnId) => void;
@@ -234,9 +229,6 @@ interface MessagesTimelineProps {
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
   revertTurnCountByUserMessageId: Map<MessageId, number>;
   onRevertUserMessage: (messageId: MessageId) => void;
-  onCancelQueuedMessage?: (messageId: MessageId) => void;
-  onSteerQueuedMessage?: (messageId: MessageId) => void;
-  canSteerQueuedMessages?: boolean;
   isRevertingCheckpoint: boolean;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   activeThreadEnvironmentId: EnvironmentId;
@@ -282,9 +274,6 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   onOpenTurnDiff,
   revertTurnCountByUserMessageId,
   onRevertUserMessage,
-  onCancelQueuedMessage = NOOP_CANCEL_QUEUED_MESSAGE,
-  onSteerQueuedMessage = NOOP_STEER_QUEUED_MESSAGE,
-  canSteerQueuedMessages = false,
   isRevertingCheckpoint,
   onImageExpand,
   activeThreadEnvironmentId,
@@ -556,9 +545,6 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       skills,
       activeThreadEnvironmentId,
       onRevertUserMessage,
-      onCancelQueuedMessage,
-      onSteerQueuedMessage,
-      canSteerQueuedMessages,
       onImageExpand,
       onOpenTurnDiff,
       onToggleTurnFold,
@@ -577,9 +563,6 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       skills,
       activeThreadEnvironmentId,
       onRevertUserMessage,
-      onCancelQueuedMessage,
-      onSteerQueuedMessage,
-      canSteerQueuedMessages,
       onImageExpand,
       onOpenTurnDiff,
       onToggleTurnFold,
@@ -1117,40 +1100,6 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
           markdownCwd={ctx.markdownCwd}
         />
       </div>
-      {row.message.deliveryState === "queued" ? (
-        <div className="mt-1 flex w-full max-w-[80%] items-center justify-end gap-1.5 pe-1 text-xs text-muted-foreground">
-          <div className="flex items-center gap-1 rounded-lg border border-border/60 bg-muted/35 px-2 py-1">
-            <span className="font-medium text-foreground/75">Queued</span>
-            <span aria-hidden="true" className="text-muted-foreground/60">
-              ·
-            </span>
-            <span>Runs next</span>
-          </div>
-          <Button
-            type="button"
-            size="xs"
-            variant="ghost"
-            disabled={!ctx.canSteerQueuedMessages}
-            onClick={() => ctx.onSteerQueuedMessage(row.message.id)}
-            aria-label="Steer queued message now"
-            className="gap-1 px-2"
-          >
-            <ZapIcon className="size-3" />
-            Steer
-          </Button>
-          <Button
-            type="button"
-            size="xs"
-            variant="ghost"
-            onClick={() => ctx.onCancelQueuedMessage(row.message.id)}
-            aria-label="Cancel queued message"
-            className="gap-1 px-2"
-          >
-            <XIcon className="size-3" />
-            Cancel
-          </Button>
-        </div>
-      ) : null}
       <div className="flex w-full max-w-[80%] items-center justify-end pe-1 text-xs tabular-nums opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover:opacity-100">
         <div className="flex shrink-0 items-center gap-2">
           <Tooltip>

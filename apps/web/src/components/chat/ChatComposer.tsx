@@ -1,6 +1,7 @@
 import type {
   ApprovalRequestId,
   EnvironmentId,
+  MessageId,
   ModelSelection,
   PreviewAnnotationPayload,
   ProviderApprovalDecision,
@@ -140,6 +141,7 @@ import {
 } from "./composerSubmission";
 import { ComposerPromptLengthValidation } from "./ComposerPromptLengthValidation";
 import { ComposerSpeechButton } from "./ComposerSpeechButton";
+import { ComposerQueueStack, type ComposerQueueItem } from "./ComposerQueueStack";
 import { formatSpeechInsertion } from "../../speech/speechInsertion";
 import { useDesktopSpeechInput } from "../../speech/useDesktopSpeechInput";
 
@@ -619,6 +621,13 @@ export interface ChatComposerProps {
   activeTasksProgress: ComposerTasksProgress | null;
   activeTaskSteps: readonly ComposerTaskStep[] | null;
 
+  // Queued turns stay attached to the composer so they remain visible and
+  // actionable while the active turn continues in the timeline.
+  queuedMessages: ReadonlyArray<ComposerQueueItem>;
+  canSteerQueuedMessages: boolean;
+  onCancelQueuedMessage: (messageId: MessageId) => void;
+  onSteerQueuedMessage: (messageId: MessageId) => void;
+
   // Mode
   runtimeMode: RuntimeMode;
   interactionMode: ProviderInteractionMode;
@@ -718,6 +727,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     activeProposedPlan,
     activeTasksProgress,
     activeTaskSteps,
+    queuedMessages,
+    canSteerQueuedMessages,
+    onCancelQueuedMessage,
+    onSteerQueuedMessage,
     runtimeMode,
     interactionMode,
     lockedProvider,
@@ -3066,6 +3079,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       className={cn("mx-auto w-full min-w-0 max-w-3xl", hasShoulderTab && "pt-7")}
       data-chat-composer-form="true"
     >
+      <ComposerQueueStack
+        items={queuedMessages}
+        canSteer={canSteerQueuedMessages}
+        onSteer={onSteerQueuedMessage}
+        onCancel={onCancelQueuedMessage}
+      />
       {showComposerTopDrawer && (!isTasksDrawerOpen || hasBlockingComposerTopDrawer) ? (
         <div
           className="chat-composer-top-drawer"
