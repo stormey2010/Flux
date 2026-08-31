@@ -5346,8 +5346,13 @@ function ChatViewContent(props: ChatViewProps) {
     },
   ) => {
     e?.preventDefault();
-    const canQueueWhileRunning =
-      phase === "running" && (submissionIntent === "foreground" || submissionIntent === "queue");
+    // The primary composer action is intentionally queue-first while a turn
+    // is active. Normalize the default form-submit intent here as well as in
+    // the UI so keyboard submit, mouse submit, and any future caller all use
+    // the same delivery contract.
+    const effectiveSubmissionIntent =
+      phase === "running" && submissionIntent === "foreground" ? "queue" : submissionIntent;
+    const canQueueWhileRunning = phase === "running" && effectiveSubmissionIntent === "queue";
     const notifyDirectAnnotationAttached = () => {
       if (!directAnnotation) return;
       toastManager.add(
@@ -5660,7 +5665,9 @@ function ChatViewContent(props: ChatViewProps) {
     }
 
     const resolvedSubmissionIntent =
-      submissionIntent === "background" && isLocalDraftThread ? "background" : submissionIntent;
+      effectiveSubmissionIntent === "background" && isLocalDraftThread
+        ? "background"
+        : effectiveSubmissionIntent;
     if (
       shouldDockDraftHeroForSubmission({
         isDraftHeroState,
