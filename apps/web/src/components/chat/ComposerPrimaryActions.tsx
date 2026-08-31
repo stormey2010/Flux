@@ -243,6 +243,12 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
           : "bg-message-action text-message-action-foreground enabled:shadow-message-action/24 hover:bg-message-action-hover",
       )}
       {...pointerFocusProps}
+      onClick={(event) => {
+        if (isRunning && onQueue) {
+          event.preventDefault();
+          onQueue();
+        }
+      }}
       disabled={
         isSendBusyForCurrentAction ||
         isSendDisabled ||

@@ -2695,13 +2695,20 @@ function ChatViewContent(props: ChatViewProps) {
     feedbackSubmissions,
     optimisticUserMessages,
   ]);
-  const queuedMessages = useMemo(
-    () =>
-      timelineMessages
-        .filter((message) => message.role === "user" && message.deliveryState === "queued")
-        .map((message) => ({ id: message.id, text: message.text })),
-    [timelineMessages],
-  );
+  const queuedMessages = useMemo(() => {
+    const queuedById = new Map<MessageId, { id: MessageId; text: string }>();
+    for (const message of timelineMessages) {
+      if (message.role === "user" && message.deliveryState === "queued") {
+        queuedById.set(message.id, { id: message.id, text: message.text });
+      }
+    }
+    for (const message of optimisticUserMessages) {
+      if (message.role === "user" && message.deliveryState === "queued") {
+        queuedById.set(message.id, { id: message.id, text: message.text });
+      }
+    }
+    return [...queuedById.values()];
+  }, [optimisticUserMessages, timelineMessages]);
   const timelineEntries = useMemo(
     () =>
       deriveTimelineEntries(
@@ -4319,13 +4326,29 @@ function ChatViewContent(props: ChatViewProps) {
       return;
     }
     const serverIds = new Set(activeThread.messages.map((message) => message.id));
-    const removedMessages = optimisticUserMessages.filter((message) => serverIds.has(message.id));
+    const serverMessagesById = new Map(
+      activeThread.messages.map((message) => [message.id, message]),
+    );
+    const removedMessages = optimisticUserMessages.filter((message) => {
+      if (!serverIds.has(message.id)) return false;
+      if (message.deliveryState !== "queued") return true;
+      const serverMessage = serverMessagesById.get(message.id);
+      // Keep the optimistic queue marker while the ordinary message
+      // projection catches up. A dispatched queued message receives a turn id
+      // and can then be removed from the optimistic overlay.
+      return serverMessage?.deliveryState !== "queued" && serverMessage?.turnId !== null;
+    });
     if (removedMessages.length === 0) {
       return;
     }
     const timer = window.setTimeout(() => {
       setOptimisticUserMessages((existing) =>
-        existing.filter((message) => !serverIds.has(message.id)),
+        existing.filter((message) => {
+          if (!serverIds.has(message.id)) return true;
+          if (message.deliveryState !== "queued") return false;
+          const serverMessage = serverMessagesById.get(message.id);
+          return !(serverMessage?.deliveryState !== "queued" && serverMessage?.turnId !== null);
+        }),
       );
     }, 0);
     for (const removedMessage of removedMessages) {
@@ -5757,6 +5780,10 @@ function ChatViewContent(props: ChatViewProps) {
         role: "user",
         text: outgoingMessageText,
         ...(optimisticAttachments.length > 0 ? { attachments: optimisticAttachments } : {}),
+        // Queue submissions need to render as queued before the server event
+        // round-trips. Without this optimistic state, the draft appears as a
+        // normal sent bubble and the composer queue stack has nothing to show.
+        ...(resolvedSubmissionIntent === "queue" ? { deliveryState: "queued" as const } : {}),
         turnId: null,
         createdAt: messageCreatedAt,
         updatedAt: messageCreatedAt,
@@ -6726,19 +6753,24 @@ function ChatViewContent(props: ChatViewProps) {
     void onRevertToTurnCountRef.current(targetTurnCount);
   }, []);
   const onCancelQueuedMessage = useCallback(
-    (messageId: MessageId) => {
+    async (messageId: MessageId) => {
       if (!activeThread) return;
-      void cancelQueuedTurn({
+      const result = await cancelQueuedTurn({
         environmentId,
         input: { threadId: activeThread.id, messageId },
       });
+      if (result._tag === "Success") {
+        setOptimisticUserMessages((existing) =>
+          existing.filter((message) => message.id !== messageId),
+        );
+      }
     },
     [activeThread, cancelQueuedTurn, environmentId],
   );
   const onSteerQueuedMessage = useCallback(
-    (messageId: MessageId) => {
+    async (messageId: MessageId) => {
       if (!activeThread || activeRunningTurnId === null) return;
-      void steerQueuedTurn({
+      const result = await steerQueuedTurn({
         environmentId,
         input: {
           threadId: activeThread.id,
@@ -6746,6 +6778,11 @@ function ChatViewContent(props: ChatViewProps) {
           expectedTurnId: activeRunningTurnId,
         },
       });
+      if (result._tag === "Success") {
+        setOptimisticUserMessages((existing) =>
+          existing.filter((message) => message.id !== messageId),
+        );
+      }
     },
     [activeRunningTurnId, activeThread, environmentId, steerQueuedTurn],
   );
