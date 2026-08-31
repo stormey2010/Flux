@@ -25,6 +25,7 @@ import * as Equal from "effect/Equal";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as PartitionedSemaphore from "effect/PartitionedSemaphore";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
@@ -106,6 +107,11 @@ const MAX_THREAD_TITLE_CONTEXT_CHARS = 8_000;
 const MAX_FIRST_USER_TITLE_CONTEXT_CHARS = 2_000;
 const THREAD_TITLE_CONTEXT_TRUNCATION_MARKER = "[Earlier content truncated]\n\n";
 const FIRST_USER_CONTEXT_TRUNCATION_MARKER = "\n[First user message truncated]";
+
+const queuedTurnDrainLock = PartitionedSemaphore.makeUnsafe<ThreadId>({ permits: 1 });
+
+const isBlockingSessionStatus = (status: OrchestrationSession["status"] | undefined): boolean =>
+  status === "starting" || status === "running";
 
 type ThreadTitleMessage = {
   readonly role: "user" | "assistant" | "system";
@@ -1327,40 +1333,43 @@ const make = Effect.gen(function* () {
   const tryDispatchNextQueuedTurn = Effect.fn("tryDispatchNextQueuedTurn")(function* (
     threadId: ThreadId,
   ) {
-    const rows = yield* projectionQueuedTurnRepository.listByThreadId({ threadId });
-    if (rows.some((row) => row.status === "handoff")) return;
-    const next = rows.find((row) => row.status === "queued");
-    if (next === undefined) return;
-    const thread = yield* resolveThread(threadId);
-    if (thread === undefined) return;
-    const status = thread.session?.status;
-    if (status === "starting" || status === "running" || status === "error") return;
-    const createdAt = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
-    // The original command id belongs to the durable queue request and has
-    // already been acknowledged by the orchestration engine. Reusing it here
-    // would make the deferred dispatch look like a duplicate command, so the
-    // engine would skip the queued-turn-dispatched/turn-start events entirely.
-    const dispatchCommandId = yield* serverCommandId("queued-turn-dispatch");
-    yield* orchestrationEngine.dispatch({
-      type: "thread.queued-turn.dispatch",
-      commandId: dispatchCommandId,
-      threadId: next.threadId,
-      messageId: next.messageId,
-      ...(next.modelSelection !== null ? { modelSelection: next.modelSelection } : {}),
-      ...(next.titleSeed !== null ? { titleSeed: next.titleSeed } : {}),
-      runtimeMode: next.runtimeMode,
-      interactionMode: next.interactionMode,
-      ...(next.sourceProposedPlanThreadId !== null && next.sourceProposedPlanId !== null
-        ? {
-            sourceProposedPlan: {
-              threadId: next.sourceProposedPlanThreadId,
-              planId: next.sourceProposedPlanId,
-            },
-          }
-        : {}),
-      queuedAt: next.queuedAt,
-      createdAt,
-    });
+    return yield* queuedTurnDrainLock.withPermit(threadId)(
+      Effect.gen(function* () {
+        const rows = yield* projectionQueuedTurnRepository.listByThreadId({ threadId });
+        if (rows.some((row) => row.status === "handoff")) return;
+        const next = rows.find((row) => row.status === "queued");
+        if (next === undefined) return;
+        const thread = yield* resolveThread(threadId);
+        if (thread === undefined) return;
+        if (isBlockingSessionStatus(thread.session?.status)) return;
+        const createdAt = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
+        // The original command id belongs to the durable queue request and has
+        // already been acknowledged by the orchestration engine. Reusing it here
+        // would make the deferred dispatch look like a duplicate command, so the
+        // engine would skip the queued-turn-dispatched/turn-start events entirely.
+        const dispatchCommandId = yield* serverCommandId("queued-turn-dispatch");
+        yield* orchestrationEngine.dispatch({
+          type: "thread.queued-turn.dispatch",
+          commandId: dispatchCommandId,
+          threadId: next.threadId,
+          messageId: next.messageId,
+          ...(next.modelSelection !== null ? { modelSelection: next.modelSelection } : {}),
+          ...(next.titleSeed !== null ? { titleSeed: next.titleSeed } : {}),
+          runtimeMode: next.runtimeMode,
+          interactionMode: next.interactionMode,
+          ...(next.sourceProposedPlanThreadId !== null && next.sourceProposedPlanId !== null
+            ? {
+                sourceProposedPlan: {
+                  threadId: next.sourceProposedPlanThreadId,
+                  planId: next.sourceProposedPlanId,
+                },
+              }
+            : {}),
+          queuedAt: next.queuedAt,
+          createdAt,
+        });
+      }),
+    );
   });
 
   const processTurnInterruptRequested = Effect.fn("processTurnInterruptRequested")(function* (
@@ -1628,11 +1637,7 @@ const make = Effect.gen(function* () {
         yield* processSessionStopRequested(event);
         return;
       case "thread.session-set":
-        if (
-          event.payload.session.status !== "starting" &&
-          event.payload.session.status !== "running" &&
-          event.payload.session.status !== "error"
-        ) {
+        if (!isBlockingSessionStatus(event.payload.session.status)) {
           yield* tryDispatchNextQueuedTurn(event.payload.threadId);
         }
         return;

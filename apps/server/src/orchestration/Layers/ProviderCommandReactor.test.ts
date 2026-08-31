@@ -661,7 +661,7 @@ describe("ProviderCommandReactor", () => {
     for (const [index, text] of ["first queued", "second queued"].entries()) {
       await harness.runEffect(
         harness.engine.dispatch({
-          type: "thread.turn.start",
+          type: "thread.queued-turn.enqueue",
           commandId: CommandId.make(`cmd-queue-${index + 1}`),
           threadId: ThreadId.make("thread-1"),
           message: {
@@ -672,7 +672,6 @@ describe("ProviderCommandReactor", () => {
           },
           interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
           runtimeMode: "full-access",
-          deliveryMode: "after-current",
           createdAt: now,
         }),
       );
