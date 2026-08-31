@@ -14,7 +14,7 @@ const layer = it.layer(
 );
 
 layer("ProjectionQueuedTurnRepository", (it) => {
-  it.effect("keeps FIFO order and transitions a row exactly once", () =>
+  it.effect("keeps queue order and transitions a row exactly once", () =>
     Effect.gen(function* () {
       const repository = yield* ProjectionQueuedTurnRepository;
       const threadId = ThreadId.make("thread-queue-repository");

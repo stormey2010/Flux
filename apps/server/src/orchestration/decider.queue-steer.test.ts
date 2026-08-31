@@ -205,6 +205,28 @@ it.layer(NodeServices.layer)("queued and steered turns", (it) => {
     }),
   );
 
+  it.effect("edits only messages that remain queued", () =>
+    Effect.gen(function* () {
+      const result = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.queued-turn.edit",
+          commandId: CommandId.make("cmd-edit-queued-turn"),
+          threadId: THREAD_ID,
+          messageId: MESSAGE_ID,
+          text: "Updated queued request",
+          createdAt: NOW,
+        },
+        readModel: makeReadModel({ queued: true }),
+      });
+      const events = Array.isArray(result) ? result : [result];
+      expect(events.map((event) => event.type)).toEqual(["thread.queued-turn-edited"]);
+      expect(events[0]?.payload).toMatchObject({
+        messageId: MESSAGE_ID,
+        text: "Updated queued request",
+      });
+    }),
+  );
+
   it.effect("promotes a queued message to a steer request without duplicating it", () =>
     Effect.gen(function* () {
       const result = yield* decideOrchestrationCommand({

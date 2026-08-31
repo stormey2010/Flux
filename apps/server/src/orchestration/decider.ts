@@ -1130,6 +1130,38 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "thread.queued-turn.edit": {
+      const thread = yield* requireThread({ readModel, command, threadId: command.threadId });
+      const message = thread.messages.find((entry) => entry.id === command.messageId);
+      if (message?.role !== "user" || message.deliveryState !== "queued") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Queued user message '${command.messageId}' does not exist on thread '${command.threadId}'.`,
+        });
+      }
+      if (command.text.trim().length === 0) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Queued messages cannot be empty.",
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.queued-turn-edited",
+        payload: {
+          threadId: command.threadId,
+          messageId: command.messageId,
+          text: command.text,
+          updatedAt: command.createdAt,
+        },
+      };
+    }
+
     case "thread.queued-turn.steer": {
       const thread = yield* requireThread({ readModel, command, threadId: command.threadId });
       const message = thread.messages.find((entry) => entry.id === command.messageId);

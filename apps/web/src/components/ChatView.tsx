@@ -1306,6 +1306,9 @@ function ChatViewContent(props: ChatViewProps) {
   const cancelQueuedTurn = useAtomCommand(threadEnvironment.cancelQueuedTurn, {
     reportFailure: false,
   });
+  const editQueuedTurn = useAtomCommand(threadEnvironment.editQueuedTurn, {
+    reportFailure: false,
+  });
   const uploadThreadFeedback = useAtomCommand(threadEnvironment.uploadFeedback, {
     reportFailure: false,
   });
@@ -6786,6 +6789,25 @@ function ChatViewContent(props: ChatViewProps) {
     },
     [activeRunningTurnId, activeThread, environmentId, steerQueuedTurn],
   );
+  const onEditQueuedMessage = useCallback(
+    async (messageId: MessageId, text: string) => {
+      if (!activeThread) return;
+      const result = await editQueuedTurn({
+        environmentId,
+        input: { threadId: activeThread.id, messageId, text },
+      });
+      if (result._tag === "Success") {
+        setOptimisticUserMessages((existing) =>
+          existing.map((message) =>
+            message.id === messageId
+              ? { ...message, text, updatedAt: new Date().toISOString() }
+              : message,
+          ),
+        );
+      }
+    },
+    [activeThread, editQueuedTurn, environmentId],
+  );
 
   // Empty state: no active thread
   if (!activeThread) {
@@ -7196,6 +7218,7 @@ function ChatViewContent(props: ChatViewProps) {
                             canSteerQueuedMessages={activeRunningTurnId !== null}
                             onCancelQueuedMessage={onCancelQueuedMessage}
                             onSteerQueuedMessage={onSteerQueuedMessage}
+                            onEditQueuedMessage={onEditQueuedMessage}
                             runtimeMode={runtimeMode}
                             interactionMode={interactionMode}
                             lockedProvider={lockedProvider}

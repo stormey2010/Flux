@@ -627,6 +627,7 @@ export interface ChatComposerProps {
   canSteerQueuedMessages: boolean;
   onCancelQueuedMessage: (messageId: MessageId) => void;
   onSteerQueuedMessage: (messageId: MessageId) => void;
+  onEditQueuedMessage: (messageId: MessageId, text: string) => void | Promise<void>;
 
   // Mode
   runtimeMode: RuntimeMode;
@@ -731,6 +732,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     canSteerQueuedMessages,
     onCancelQueuedMessage,
     onSteerQueuedMessage,
+    onEditQueuedMessage,
     runtimeMode,
     interactionMode,
     lockedProvider,
@@ -3084,6 +3086,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         canSteer={canSteerQueuedMessages}
         onSteer={onSteerQueuedMessage}
         onCancel={onCancelQueuedMessage}
+        onEdit={onEditQueuedMessage}
       />
       {showComposerTopDrawer && (!isTasksDrawerOpen || hasBlockingComposerTopDrawer) ? (
         <div

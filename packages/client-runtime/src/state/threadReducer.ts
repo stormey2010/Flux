@@ -308,6 +308,20 @@ export function applyThreadDetailEvent(
         },
       };
 
+    case "thread.queued-turn-edited":
+      return {
+        kind: "updated",
+        thread: {
+          ...thread,
+          messages: thread.messages.map((message) =>
+            message.id === event.payload.messageId
+              ? { ...message, text: event.payload.text, updatedAt: event.payload.updatedAt }
+              : message,
+          ),
+          updatedAt: event.occurredAt,
+        },
+      };
+
     case "thread.turn-interrupt-requested": {
       if (event.payload.turnId === undefined) {
         return { kind: "unchanged" };

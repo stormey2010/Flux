@@ -1011,9 +1011,28 @@ describe("applyThreadDetailEvent", () => {
       if (queued.kind !== "updated") return;
       expect(queued.thread.messages[0]?.deliveryState).toBe("queued");
 
-      const dispatched = applyThreadDetailEvent(queued.thread, {
+      const edited = applyThreadDetailEvent(queued.thread, {
         ...baseEventFields,
         sequence: 17,
+        occurredAt: "2026-04-01T14:01:30.000Z",
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-1"),
+        type: "thread.queued-turn-edited",
+        payload: {
+          threadId: ThreadId.make("thread-1"),
+          messageId: queuedMessage.id,
+          text: "Updated queued request",
+          updatedAt: "2026-04-01T14:01:30.000Z",
+        },
+      });
+      expect(edited.kind).toBe("updated");
+      if (edited.kind !== "updated") return;
+      expect(edited.thread.messages[0]?.text).toBe("Updated queued request");
+      expect(edited.thread.messages[0]?.deliveryState).toBe("queued");
+
+      const dispatched = applyThreadDetailEvent(queued.thread, {
+        ...baseEventFields,
+        sequence: 18,
         occurredAt: "2026-04-01T14:02:00.000Z",
         aggregateKind: "thread",
         aggregateId: ThreadId.make("thread-1"),
@@ -1030,7 +1049,7 @@ describe("applyThreadDetailEvent", () => {
 
       const cancelled = applyThreadDetailEvent(queued.thread, {
         ...baseEventFields,
-        sequence: 18,
+        sequence: 19,
         occurredAt: "2026-04-01T14:03:00.000Z",
         aggregateKind: "thread",
         aggregateId: ThreadId.make("thread-1"),

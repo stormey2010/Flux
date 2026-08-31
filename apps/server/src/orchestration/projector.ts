@@ -618,6 +618,22 @@ export function projectEvent(
       });
     }
 
+    case "thread.queued-turn-edited": {
+      const thread = nextBase.threads.find((entry) => entry.id === event.payload.threadId);
+      if (!thread) return Effect.succeed(nextBase);
+      return Effect.succeed({
+        ...nextBase,
+        threads: updateThread(nextBase.threads, event.payload.threadId, {
+          messages: thread.messages.map((message) =>
+            message.id === event.payload.messageId
+              ? { ...message, text: event.payload.text, updatedAt: event.payload.updatedAt }
+              : message,
+          ),
+          updatedAt: event.occurredAt,
+        }),
+      });
+    }
+
     case "thread.session-set":
       return Effect.gen(function* () {
         const payload = yield* decodeForEvent(

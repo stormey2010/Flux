@@ -90,7 +90,7 @@ export type AtomCommandConcurrency<W> =
   | { readonly mode: "parallel" }
   | {
       /**
-       * `serial` preserves every invocation in FIFO order, `singleFlight` shares an active
+       * `serial` preserves every invocation in submission order, `singleFlight` shares an active
        * invocation, and `latest` coalesces queued invocations to the newest input.
        */
       readonly mode: "serial" | "singleFlight" | "latest";

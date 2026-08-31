@@ -10,14 +10,22 @@ const items = [
 ];
 
 describe("ComposerQueueStack", () => {
-  it("renders queued messages in FIFO order with individual actions", () => {
+  it("renders queued messages in order with individual actions", () => {
     const markup = renderToStaticMarkup(
-      <ComposerQueueStack items={items} canSteer onSteer={() => {}} onCancel={() => {}} />,
+      <ComposerQueueStack
+        items={items}
+        canSteer
+        onSteer={() => {}}
+        onCancel={() => {}}
+        onEdit={() => {}}
+      />,
     );
 
     expect(markup).toContain('data-chat-composer-queue="true"');
     expect(markup).toContain("2 messages waiting");
     expect(markup).toContain("Runs next");
+    expect(markup).toContain("Edit queued message 1");
+    expect(markup).not.toContain("FIFO");
     expect(markup.indexOf("first queued request")).toBeLessThan(
       markup.indexOf("second queued request"),
     );
@@ -28,7 +36,13 @@ describe("ComposerQueueStack", () => {
   it("does not render when the durable queue is empty", () => {
     expect(
       renderToStaticMarkup(
-        <ComposerQueueStack items={[]} canSteer={false} onSteer={() => {}} onCancel={() => {}} />,
+        <ComposerQueueStack
+          items={[]}
+          canSteer={false}
+          onSteer={() => {}}
+          onCancel={() => {}}
+          onEdit={() => {}}
+        />,
       ),
     ).toBe("");
   });

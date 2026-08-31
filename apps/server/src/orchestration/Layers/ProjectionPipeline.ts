@@ -1064,6 +1064,19 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           return;
         }
 
+        case "thread.queued-turn-edited": {
+          const existingMessage = yield* projectionThreadMessageRepository.getByMessageId({
+            messageId: event.payload.messageId,
+          });
+          if (Option.isNone(existingMessage)) return;
+          yield* projectionThreadMessageRepository.upsert({
+            ...existingMessage.value,
+            text: event.payload.text,
+            updatedAt: event.payload.updatedAt,
+          });
+          return;
+        }
+
         case "thread.reverted": {
           const existingRows = yield* projectionThreadMessageRepository.listByThreadId({
             threadId: event.payload.threadId,
