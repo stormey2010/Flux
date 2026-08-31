@@ -4537,7 +4537,11 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     // background agent responses between user prompts) are auto-closed
     // instead, so they don't block the user's next turn.
     const steeringTurnState =
-      context.turnState && context.turnState.synthetic !== true ? context.turnState : null;
+      input.forceNewTurn === true
+        ? null
+        : context.turnState && context.turnState.synthetic !== true
+          ? context.turnState
+          : null;
     if (context.turnState && steeringTurnState === null) {
       yield* completeTurn(context, "completed");
     }

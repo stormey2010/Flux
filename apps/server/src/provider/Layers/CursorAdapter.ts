@@ -919,7 +919,8 @@ export function makeCursorAdapter(
         // A sendTurn while a prompt is in flight is a steer: the agent folds
         // the new prompt into the ongoing work, so the active turn id is
         // reused instead of opening a new turn.
-        const steeringTurnId = ctx.promptsInFlight > 0 ? ctx.activeTurnId : undefined;
+        const steeringTurnId =
+          input.forceNewTurn === true || ctx.promptsInFlight === 0 ? undefined : ctx.activeTurnId;
         const turnId = steeringTurnId ?? TurnId.make(yield* randomUUIDv4);
         // Count this prompt immediately so a superseded in-flight prompt
         // resolving from here on does not settle the turn; the matching

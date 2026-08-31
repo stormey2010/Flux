@@ -1432,7 +1432,7 @@ export function makeOpenCodeAdapter(
       // A sendTurn while a turn is active is a steer: OpenCode queues the
       // prompt into the busy session and the work continues as one turn, so
       // the active turn id is reused instead of opening a new turn.
-      const steeringTurnId = context.activeTurnId;
+      const steeringTurnId = input.forceNewTurn === true ? undefined : context.activeTurnId;
       const turnId = steeringTurnId ?? TurnId.make(`opencode-turn-${yield* randomUUIDv4}`);
       const modelSelection =
         input.modelSelection ??

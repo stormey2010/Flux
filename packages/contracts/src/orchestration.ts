@@ -1417,6 +1417,8 @@ export const ThreadTurnStartRequestedPayload = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_PROVIDER_INTERACTION_MODE)),
   ),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
+  /** Set by the server when a queued run is being handed off as a fresh turn. */
+  forceNewTurn: Schema.optional(Schema.Boolean),
   createdAt: IsoDateTime,
 });
 

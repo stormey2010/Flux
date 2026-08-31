@@ -68,6 +68,13 @@ export type ProviderSessionStartInput = typeof ProviderSessionStartInput.Type;
 
 export const ProviderSendTurnInput = Schema.Struct({
   threadId: ThreadId,
+  /**
+   * Queue handoff turns must remain a new provider turn even if the adapter
+   * still has the previous prompt's completion callback in flight. Without
+   * this marker adapters that normally treat overlapping sends as steering
+   * can merge a Run Next item into the active turn.
+   */
+  forceNewTurn: Schema.optional(Schema.Boolean),
   input: Schema.optional(
     TrimmedNonEmptyString.check(Schema.isMaxLength(PROVIDER_SEND_TURN_MAX_INPUT_CHARS)),
   ),

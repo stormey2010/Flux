@@ -795,6 +795,7 @@ const make = Effect.gen(function* () {
     readonly attachments?: ReadonlyArray<ChatAttachment>;
     readonly modelSelection?: ModelSelection;
     readonly interactionMode?: "default" | "plan";
+    readonly forceNewTurn?: boolean;
     readonly createdAt: string;
   }) {
     const thread = yield* resolveThread(input.threadId);
@@ -846,6 +847,7 @@ const make = Effect.gen(function* () {
       ...(normalizedAttachments.length > 0 ? { attachments: normalizedAttachments } : {}),
       ...(modelForTurn !== undefined ? { modelSelection: modelForTurn } : {}),
       ...(input.interactionMode !== undefined ? { interactionMode: input.interactionMode } : {}),
+      ...(input.forceNewTurn === true ? { forceNewTurn: true } : {}),
     };
   });
 
@@ -1228,6 +1230,7 @@ const make = Effect.gen(function* () {
         ? { modelSelection: event.payload.modelSelection }
         : {}),
       interactionMode: event.payload.interactionMode,
+      ...(event.payload.forceNewTurn === true ? { forceNewTurn: true } : {}),
       createdAt: event.payload.createdAt,
     }).pipe(
       Effect.map(Option.some),

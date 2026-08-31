@@ -1209,6 +1209,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
             ...(command.sourceProposedPlan !== undefined
               ? { sourceProposedPlan: command.sourceProposedPlan }
               : {}),
+            forceNewTurn: true,
             createdAt: command.queuedAt,
           },
         },

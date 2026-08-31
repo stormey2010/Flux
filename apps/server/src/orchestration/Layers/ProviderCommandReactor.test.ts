@@ -763,6 +763,7 @@ describe("ProviderCommandReactor", () => {
     expect(harness.sendTurn.mock.calls[0]?.[0]).toMatchObject({
       threadId: ThreadId.make("thread-1"),
       input: "send me next",
+      forceNewTurn: true,
     });
   });
 
