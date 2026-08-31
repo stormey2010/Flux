@@ -1298,6 +1298,7 @@ function ChatViewContent(props: ChatViewProps) {
     reportFailure: false,
   });
   const startThreadTurn = useAtomCommand(threadEnvironment.startTurn, { reportFailure: false });
+  const queueThreadTurn = useAtomCommand(threadEnvironment.queueTurn, { reportFailure: false });
   const steerThreadTurn = useAtomCommand(threadEnvironment.steerTurn, { reportFailure: false });
   const steerQueuedTurn = useAtomCommand(threadEnvironment.steerQueuedTurn, {
     reportFailure: false,
@@ -5896,25 +5897,42 @@ function ChatViewContent(props: ChatViewProps) {
               createdAt: messageCreatedAt,
             },
           })
-        : await startThreadTurn({
-            environmentId,
-            input: {
-              threadId: threadIdForSend,
-              message: {
-                messageId: messageIdForSend,
-                role: "user",
-                text: outgoingMessageText,
-                attachments: turnAttachmentsResult.value,
+        : shouldQueueAfterCurrent
+          ? await queueThreadTurn({
+              environmentId,
+              input: {
+                threadId: threadIdForSend,
+                message: {
+                  messageId: messageIdForSend,
+                  role: "user",
+                  text: outgoingMessageText,
+                  attachments: turnAttachmentsResult.value,
+                },
+                modelSelection: ctxSelectedModelSelection,
+                titleSeed: title,
+                runtimeMode,
+                interactionMode,
+                createdAt: messageCreatedAt,
               },
-              modelSelection: ctxSelectedModelSelection,
-              titleSeed: title,
-              runtimeMode,
-              interactionMode,
-              ...(shouldQueueAfterCurrent ? { deliveryMode: "after-current" as const } : {}),
-              ...(bootstrap ? { bootstrap } : {}),
-              createdAt: messageCreatedAt,
-            },
-          });
+            })
+          : await startThreadTurn({
+              environmentId,
+              input: {
+                threadId: threadIdForSend,
+                message: {
+                  messageId: messageIdForSend,
+                  role: "user",
+                  text: outgoingMessageText,
+                  attachments: turnAttachmentsResult.value,
+                },
+                modelSelection: ctxSelectedModelSelection,
+                titleSeed: title,
+                runtimeMode,
+                interactionMode,
+                ...(bootstrap ? { bootstrap } : {}),
+                createdAt: messageCreatedAt,
+              },
+            });
       if (startResult._tag === "Failure") {
         if (backgroundThreadRef) {
           clearBackgroundDraftSubmissionByRef(backgroundThreadRef);
@@ -6368,6 +6386,7 @@ function ChatViewContent(props: ChatViewProps) {
       scrollToEnd,
       setComposerDraftInteractionMode,
       setThreadError,
+      queueThreadTurn,
       startThreadTurn,
       environmentId,
       composerRef,

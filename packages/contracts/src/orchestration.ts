@@ -926,6 +926,24 @@ const ClientThreadTurnSteerCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ClientThreadQueuedTurnEnqueueCommand = Schema.Struct({
+  type: Schema.Literal("thread.queued-turn.enqueue"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  message: Schema.Struct({
+    messageId: MessageId,
+    role: Schema.Literal("user"),
+    text: Schema.String,
+    attachments: Schema.Array(Schema.Union([UploadChatAttachment, ChatAttachment])),
+  }),
+  modelSelection: Schema.optional(ModelSelection),
+  titleSeed: Schema.optional(TrimmedNonEmptyString),
+  runtimeMode: RuntimeMode,
+  interactionMode: ProviderInteractionMode,
+  sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
+  createdAt: IsoDateTime,
+});
+
 const ThreadTurnSteerCommand = Schema.Struct({
   type: Schema.Literal("thread.turn.steer"),
   commandId: CommandId,
@@ -937,6 +955,24 @@ const ThreadTurnSteerCommand = Schema.Struct({
     text: Schema.String,
     attachments: Schema.Array(ChatAttachment),
   }),
+  createdAt: IsoDateTime,
+});
+
+const ThreadQueuedTurnEnqueueCommand = Schema.Struct({
+  type: Schema.Literal("thread.queued-turn.enqueue"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  message: Schema.Struct({
+    messageId: MessageId,
+    role: Schema.Literal("user"),
+    text: Schema.String,
+    attachments: Schema.Array(ChatAttachment),
+  }),
+  modelSelection: Schema.optional(ModelSelection),
+  titleSeed: Schema.optional(TrimmedNonEmptyString),
+  runtimeMode: RuntimeMode,
+  interactionMode: ProviderInteractionMode,
+  sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
   createdAt: IsoDateTime,
 });
 
@@ -1023,6 +1059,7 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadRuntimeModeSetCommand,
   ThreadInteractionModeSetCommand,
   ThreadTurnStartCommand,
+  ThreadQueuedTurnEnqueueCommand,
   ThreadTurnSteerCommand,
   ThreadQueuedTurnCancelCommand,
   ThreadQueuedTurnSteerCommand,
@@ -1054,6 +1091,7 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadRuntimeModeSetCommand,
   ThreadInteractionModeSetCommand,
   ClientThreadTurnStartCommand,
+  ClientThreadQueuedTurnEnqueueCommand,
   ClientThreadTurnSteerCommand,
   ThreadQueuedTurnCancelCommand,
   ThreadQueuedTurnSteerCommand,

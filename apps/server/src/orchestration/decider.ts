@@ -933,7 +933,8 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
-    case "thread.turn.start": {
+    case "thread.turn.start":
+    case "thread.queued-turn.enqueue": {
       const targetThread = yield* requireThread({
         readModel,
         command,
@@ -992,7 +993,8 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         })),
         causationEventId: userMessageEvent.eventId,
         type:
-          command.deliveryMode === "after-current"
+          command.type === "thread.queued-turn.enqueue" ||
+          ("deliveryMode" in command && command.deliveryMode === "after-current")
             ? "thread.turn-queued"
             : "thread.turn-start-requested",
         payload: {

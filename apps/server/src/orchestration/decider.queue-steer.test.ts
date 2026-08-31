@@ -114,6 +114,34 @@ it.layer(NodeServices.layer)("queued and steered turns", (it) => {
     }),
   );
 
+  it.effect("uses the explicit enqueue command for Send while a turn runs", () =>
+    Effect.gen(function* () {
+      const result = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.queued-turn.enqueue",
+          commandId: CommandId.make("cmd-explicit-queue-turn"),
+          threadId: THREAD_ID,
+          message: {
+            messageId: MessageId.make("message-explicit-queue"),
+            role: "user",
+            text: "This must wait",
+            attachments: [],
+          },
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          createdAt: NOW,
+        },
+        readModel: makeReadModel({ running: true }),
+      });
+
+      const events = Array.isArray(result) ? result : [result];
+      expect(events.map((event) => event.type)).toEqual([
+        "thread.message-sent",
+        "thread.turn-queued",
+      ]);
+    }),
+  );
+
   it.effect("emits native steering only for the expected active turn", () =>
     Effect.gen(function* () {
       const result = yield* decideOrchestrationCommand({
