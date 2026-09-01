@@ -347,6 +347,28 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
           .pipe(Effect.flatMap((savedEvent) => projectionPipeline.projectEvent(savedEvent)));
 
       yield* appendAndProject({
+        type: "thread.message-sent",
+        eventId: EventId.make("evt-queue-boundary-message"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: now,
+        commandId: CommandId.make("cmd-queue-boundary-message"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-queue-boundary-message"),
+        metadata: {},
+        payload: {
+          threadId,
+          messageId,
+          role: "user",
+          text: "queued boundary",
+          turnId: null,
+          streaming: false,
+          createdAt: now,
+          updatedAt: now,
+        },
+      });
+
+      yield* appendAndProject({
         type: "thread.turn-queued",
         eventId: EventId.make("evt-queue-boundary-queued"),
         aggregateKind: "thread",
@@ -375,6 +397,11 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
       const queueStatus = () =>
         sql<{ readonly status: string }>`
           SELECT status FROM projection_thread_turn_queue WHERE message_id = ${messageId}
+        `;
+      const messageDeliveryState = () =>
+        sql<{ readonly deliveryState: string | null }>`
+          SELECT delivery_state AS "deliveryState"
+          FROM projection_thread_messages WHERE message_id = ${messageId}
         `;
       yield* appendAndProject({
         type: "thread.queued-turn-dispatched",
@@ -408,6 +435,7 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
         },
       });
       assert.deepEqual(yield* queueStatus(), [{ status: "handoff" }]);
+      assert.deepEqual(yield* messageDeliveryState(), [{ deliveryState: null }]);
 
       yield* appendAndProject({
         type: "thread.queued-turn-failed",
@@ -422,6 +450,7 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
         payload: { threadId, messageId, failedAt: now },
       });
       assert.deepEqual(yield* queueStatus(), [{ status: "queued" }]);
+      assert.deepEqual(yield* messageDeliveryState(), [{ deliveryState: "queued" }]);
 
       yield* appendAndProject({
         type: "thread.queued-turn-accepted",

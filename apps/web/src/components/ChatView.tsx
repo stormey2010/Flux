@@ -341,6 +341,7 @@ import {
   hasEnvironmentReconnectWarningGraceElapsed,
   scheduleEnvironmentReconnectWarning,
   hasServerAcknowledgedLocalDispatch,
+  isStopGenerationPrompt,
   isBranchMismatchDismissedForSession,
   shouldDockDraftHeroForSubmission,
   shouldReleaseTimelineAnchorForToolActivity,
@@ -1255,6 +1256,14 @@ type LocalThreadErrorEntry = {
 
 function chatActionErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "An error occurred.";
+}
+
+function isStaleQueuedMessageCommandError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    error.message.includes("Queued user message") &&
+    error.message.includes("does not exist on thread")
+  );
 }
 
 /**
@@ -5568,11 +5577,19 @@ function ChatViewContent(props: ChatViewProps) {
         },
       });
       if (result._tag === "Failure") {
+        const error = squashAtomCommandFailure(result);
+        if (isStaleQueuedMessageCommandError(error)) {
+          setEditingQueuedMessageId(null);
+          promptRef.current = "";
+          clearComposerDraftContent(composerDraftTarget);
+          composerRef.current?.resetCursorState({ cursor: 0 });
+          return;
+        }
         toastManager.add(
           stackedThreadToast({
             type: "error",
             title: "Could not edit queued message",
-            description: chatActionErrorMessage(squashAtomCommandFailure(result)),
+            description: chatActionErrorMessage(error),
           }),
         );
         return;
@@ -5585,6 +5602,34 @@ function ChatViewContent(props: ChatViewProps) {
         ),
       );
       setEditingQueuedMessageId(null);
+      promptRef.current = "";
+      clearComposerDraftContent(composerDraftTarget);
+      composerRef.current?.resetCursorState({ cursor: 0 });
+      return;
+    }
+    const shouldInterruptForStop =
+      phase === "running" &&
+      activeRunningTurnId !== null &&
+      directAnnotation === undefined &&
+      composerImages.length === 0 &&
+      sendableComposerTerminalContexts.length === 0 &&
+      composerElementContexts.length === 0 &&
+      composerPreviewAnnotations.length === 0 &&
+      composerReviewComments.length === 0 &&
+      isStopGenerationPrompt(trimmed);
+    if (shouldInterruptForStop) {
+      const result = await interruptThreadTurn({
+        environmentId,
+        input: buildThreadTurnInterruptInput(activeThread),
+      });
+      if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+        const error = squashAtomCommandFailure(result);
+        setThreadError(
+          activeThread.id,
+          error instanceof Error ? error.message : "Failed to interrupt the current turn.",
+        );
+        return;
+      }
       promptRef.current = "";
       clearComposerDraftContent(composerDraftTarget);
       composerRef.current?.resetCursorState({ cursor: 0 });
@@ -6885,6 +6930,36 @@ function ChatViewContent(props: ChatViewProps) {
   const onSteerQueuedMessage = useCallback(
     async (messageId: MessageId) => {
       if (!activeThread || activeRunningTurnId === null) return;
+      const queuedMessage = queuedMessages.find((message) => message.id === messageId);
+      if (queuedMessage && isStopGenerationPrompt(queuedMessage.text)) {
+        const interruptResult = await interruptThreadTurn({
+          environmentId,
+          input: buildThreadTurnInterruptInput(activeThread),
+        });
+        if (interruptResult._tag === "Failure") {
+          if (!isAtomCommandInterrupted(interruptResult)) {
+            const error = squashAtomCommandFailure(interruptResult);
+            toastManager.add(
+              stackedThreadToast({
+                type: "error",
+                title: "Could not stop the current turn",
+                description: chatActionErrorMessage(error),
+              }),
+            );
+          }
+          return;
+        }
+        const cancelResult = await cancelQueuedTurn({
+          environmentId,
+          input: { threadId: activeThread.id, messageId },
+        });
+        if (cancelResult._tag === "Success") {
+          setOptimisticUserMessages((existing) =>
+            existing.filter((message) => message.id !== messageId),
+          );
+        }
+        return;
+      }
       const result = await steerQueuedTurn({
         environmentId,
         input: {
@@ -6899,7 +6974,15 @@ function ChatViewContent(props: ChatViewProps) {
         );
       }
     },
-    [activeRunningTurnId, activeThread, environmentId, steerQueuedTurn],
+    [
+      activeRunningTurnId,
+      activeThread,
+      cancelQueuedTurn,
+      environmentId,
+      interruptThreadTurn,
+      queuedMessages,
+      steerQueuedTurn,
+    ],
   );
   const onEditQueuedMessage = useCallback(
     async (messageId: MessageId, text: string) => {
@@ -6915,6 +6998,21 @@ function ChatViewContent(props: ChatViewProps) {
               ? { ...message, text, updatedAt: new Date().toISOString() }
               : message,
           ),
+        );
+      } else {
+        const error = squashAtomCommandFailure(result);
+        if (isStaleQueuedMessageCommandError(error)) {
+          setOptimisticUserMessages((existing) =>
+            existing.filter((message) => message.id !== messageId),
+          );
+          return;
+        }
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Could not edit queued message",
+            description: chatActionErrorMessage(error),
+          }),
         );
       }
     },

@@ -18,7 +18,6 @@ import {
 import { restrictToFirstScrollableAncestor, restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import { CSS } from "@dnd-kit/utilities";
 import {
-  canSettle,
   canSnooze,
   changeRequestAutoSettles,
   effectiveSettled,
@@ -53,6 +52,7 @@ import {
   SettingsIcon,
   SquarePenIcon,
   TerminalIcon,
+  Trash2Icon,
   Undo2Icon,
   XIcon,
 } from "lucide-react";
@@ -2295,69 +2295,53 @@ export default function Sidebar() {
     return routeThread === undefined ? [] : [routeThread];
   }, [routeThreadKey, settledShelfExpanded, visibleSettledThreads]);
 
-  // Bulk settling only targets threads that are ready to leave the inbox.
-  // Snoozed threads are intentionally excluded: snoozing is the user's
-  // request to keep them out of sight until a later wake.
-  const settleableThreads = useMemo(() => {
-    const now = new Date().toISOString();
-    return [...pinnedThreads, ...activeThreads].filter(
-      (thread) =>
-        serverConfigs.get(thread.environmentId)?.environment.capabilities.threadSettlement ===
-          true && canSettle(thread, { now }),
-    );
-  }, [activeThreads, pinnedThreads, serverConfigs]);
-  const settlingAllRef = useRef(false);
-  const [settlingAll, setSettlingAll] = useState(false);
-  const handleSettleAll = useCallback(async () => {
-    if (settlingAllRef.current || settleableThreads.length === 0) return;
+  const deletingAllSettledRef = useRef(false);
+  const [deletingAllSettled, setDeletingAllSettled] = useState(false);
+  const handleDeleteAllSettled = useCallback(async () => {
+    if (deletingAllSettledRef.current || settledThreads.length === 0) return;
     const api = readLocalApi();
     if (!api) return;
 
-    settlingAllRef.current = true;
-    setSettlingAll(true);
+    const threadsToDelete = [...settledThreads];
+    deletingAllSettledRef.current = true;
+    setDeletingAllSettled(true);
     try {
-      const count = settleableThreads.length;
+      const count = threadsToDelete.length;
       const confirmation = await settlePromise(() =>
         api.dialogs.confirm(
           [
-            "Settle all ready threads?",
-            `This will move ${count} ready thread${count === 1 ? "" : "s"} to Settled.`,
-            "Threads that are still working or waiting for input will stay active.",
+            `Delete all ${count} settled thread${count === 1 ? "" : "s"}?`,
+            "This permanently clears conversation history for these threads.",
           ].join("\n"),
+          { variant: "destructive" },
         ),
       );
       if (confirmation._tag === "Failure" || !confirmation.value) return;
 
-      const results = await Promise.all(
-        settleableThreads.map((thread) =>
-          settleThread(scopeThreadRef(thread.environmentId, thread.id)),
-        ),
-      );
-      const failures = results.filter((result) => result._tag === "Failure");
-      const reportableFailures = failures.filter((result) => !isAtomCommandInterrupted(result));
-      if (reportableFailures.length > 0 && reportableFailures.length === results.length) {
-        const error = squashAtomCommandFailure(reportableFailures[0]!);
-        toastManager.add(
-          stackedThreadToast({
-            type: "error",
-            title: "Failed to settle threads",
-            description: error instanceof Error ? error.message : "An error occurred.",
-          }),
-        );
-      } else if (reportableFailures.length > 0) {
-        toastManager.add(
-          stackedThreadToast({
-            type: "warning",
-            title: `Settled ${results.length - failures.length} of ${results.length} threads`,
-            description: `${failures.length} thread${failures.length === 1 ? "" : "s"} could not be settled.`,
-          }),
-        );
+      const deletedThreadKeys = new Set<string>();
+      for (const thread of threadsToDelete) {
+        const threadRef = scopeThreadRef(thread.environmentId, thread.id);
+        const result = await deleteThread(threadRef, { deletedThreadKeys });
+        if (result._tag === "Failure") {
+          if (!isAtomCommandInterrupted(result)) {
+            const error = squashAtomCommandFailure(result);
+            toastManager.add(
+              stackedThreadToast({
+                type: "error",
+                title: "Failed to delete settled threads",
+                description: error instanceof Error ? error.message : "An error occurred.",
+              }),
+            );
+          }
+          return;
+        }
+        deletedThreadKeys.add(scopedThreadKey(threadRef));
       }
     } finally {
-      settlingAllRef.current = false;
-      setSettlingAll(false);
+      deletingAllSettledRef.current = false;
+      setDeletingAllSettled(false);
     }
-  }, [settleThread, settleableThreads]);
+  }, [deleteThread, settledThreads]);
 
   // The snoozed shelf is collapsed by default: out of the way, never gone.
   // Collapsed threads don't render (and so don't participate in jump
@@ -4011,7 +3995,7 @@ export default function Sidebar() {
                       items.push(renderThreadRow(thread, "snoozed"));
                     }
                   }
-                  if (settledThreads.length > 0 || settleableThreads.length > 0) {
+                  if (settledThreads.length > 0) {
                     items.push(
                       <li
                         key="settled-shelf-header"
@@ -4042,30 +4026,25 @@ export default function Sidebar() {
                               )}
                             />
                           </button>
-                          {settleableThreads.length > 0 ? (
-                            <Tooltip>
-                              <TooltipTrigger
-                                render={
-                                  <Button
-                                    type="button"
-                                    size="xs"
-                                    variant="ghost-muted"
-                                    className="h-6 shrink-0 px-1.5 text-[11px] text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
-                                    aria-label={`Settle all ${settleableThreads.length} ready threads`}
-                                    data-testid="sidebar-settle-all"
-                                    disabled={settlingAll}
-                                    onClick={() => void handleSettleAll()}
-                                  />
-                                }
-                              >
-                                <CheckIcon aria-hidden className="size-3" />
-                                Settle all
-                              </TooltipTrigger>
-                              <TooltipPopup side="top">
-                                Settle all ready threads ({settleableThreads.length})
-                              </TooltipPopup>
-                            </Tooltip>
-                          ) : null}
+                          <Tooltip>
+                            <TooltipTrigger
+                              render={
+                                <Button
+                                  type="button"
+                                  size="icon-micro"
+                                  variant="ghost-muted"
+                                  className="shrink-0 text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-destructive"
+                                  aria-label="Delete all settled threads"
+                                  data-testid="sidebar-delete-all-settled"
+                                  disabled={deletingAllSettled}
+                                  onClick={() => void handleDeleteAllSettled()}
+                                />
+                              }
+                            >
+                              <Trash2Icon aria-hidden className="size-3" />
+                            </TooltipTrigger>
+                            <TooltipPopup side="top">Delete all settled threads</TooltipPopup>
+                          </Tooltip>
                         </div>
                       </li>,
                     );

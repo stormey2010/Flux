@@ -304,9 +304,24 @@ export function applyThreadDetailEvent(
       };
 
     case "thread.queued-turn-dispatched":
-    case "thread.queued-turn-steer-requested":
     case "thread.queued-turn-resumed":
       return { kind: "unchanged" };
+
+    case "thread.queued-turn-steer-requested":
+      return {
+        kind: "updated",
+        thread: {
+          ...thread,
+          // Steering has consumed the queued item. A provider failure event
+          // puts the delivery marker back so the user can retry it.
+          messages: thread.messages.map((message) => {
+            if (message.id !== event.payload.messageId) return message;
+            const { deliveryState: _deliveryState, ...steeredMessage } = message;
+            return steeredMessage;
+          }),
+          updatedAt: event.occurredAt,
+        },
+      };
 
     case "thread.queued-turn-accepted":
       return {

@@ -1163,6 +1163,10 @@ const ThreadQueuedTurnAcceptedCommand = Schema.Struct({
   threadId: ThreadId,
   messageId: MessageId,
   turnId: Schema.optional(TurnId),
+  // ProviderCommandReactor uses this when a queued item was consumed by
+  // steering. That handoff clears the queued marker before the provider's
+  // terminal acceptance/failure event arrives.
+  handoff: Schema.optional(Schema.Literal("steer")),
   acceptedAt: IsoDateTime,
 });
 
@@ -1171,6 +1175,8 @@ const ThreadQueuedTurnFailedCommand = Schema.Struct({
   commandId: CommandId,
   threadId: ThreadId,
   messageId: MessageId,
+  // See ThreadQueuedTurnAcceptedCommand.handoff.
+  handoff: Schema.optional(Schema.Literal("steer")),
   failedAt: IsoDateTime,
 });
 

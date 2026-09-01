@@ -1282,7 +1282,8 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     case "thread.queued-turn.accept": {
       const thread = yield* requireThread({ readModel, command, threadId: command.threadId });
       const message = thread.messages.find((entry) => entry.id === command.messageId);
-      if (message?.role !== "user" || message.deliveryState !== "queued") {
+      const isSteerHandoff = command.handoff === "steer";
+      if (message?.role !== "user" || (message.deliveryState !== "queued" && !isSteerHandoff)) {
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
           detail: `Queued user message '${command.messageId}' is no longer waiting on thread '${command.threadId}'.`,
@@ -1308,7 +1309,8 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     case "thread.queued-turn.fail": {
       const thread = yield* requireThread({ readModel, command, threadId: command.threadId });
       const message = thread.messages.find((entry) => entry.id === command.messageId);
-      if (message?.role !== "user" || message.deliveryState !== "queued") {
+      const isSteerHandoff = command.handoff === "steer";
+      if (message?.role !== "user" || (message.deliveryState !== "queued" && !isSteerHandoff)) {
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
           detail: `Queued user message '${command.messageId}' is no longer waiting on thread '${command.threadId}'.`,

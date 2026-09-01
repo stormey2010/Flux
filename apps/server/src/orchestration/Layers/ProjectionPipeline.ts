@@ -1043,9 +1043,17 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           return;
 
         case "thread.queued-turn-dispatched":
-        case "thread.queued-turn-steer-requested":
           // Provider intent only. Keep the message in the composer queue until
           // the provider acceptance boundary commits queued-turn-accepted.
+          return;
+
+        case "thread.queued-turn-steer-requested":
+          // A steer has consumed the queued item. If the provider rejects it,
+          // queued-turn-failed restores the queued marker.
+          yield* projectionThreadMessageRepository.setDeliveryState({
+            messageId: event.payload.messageId,
+            deliveryState: null,
+          });
           return;
 
         case "thread.queued-turn-accepted": {

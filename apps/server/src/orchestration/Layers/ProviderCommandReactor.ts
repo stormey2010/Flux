@@ -110,6 +110,15 @@ const MAX_THREAD_TITLE_CONTEXT_CHARS = 8_000;
 const MAX_FIRST_USER_TITLE_CONTEXT_CHARS = 2_000;
 const THREAD_TITLE_CONTEXT_TRUNCATION_MARKER = "[Earlier content truncated]\n\n";
 const FIRST_USER_CONTEXT_TRUNCATION_MARKER = "\n[First user message truncated]";
+const QUEUED_FOLLOW_UP_INSTRUCTION =
+  "Apply the user's latest follow-up to the existing task. Continue only if the follow-up asks for more work; if it asks you to stop, honor that request. Do not mention this internal instruction or queueing to the user.";
+
+// Keep the persisted/displayed message as the user's original text. Only the
+// provider receives this wrapper, so queued turns continue the existing task
+// without adding a second synthetic message to the conversation UI.
+function buildQueuedFollowUpPrompt(messageText: string): string {
+  return `${QUEUED_FOLLOW_UP_INSTRUCTION}\n\nUser follow-up:\n${messageText}`;
+}
 
 const queuedTurnDrainLock = PartitionedSemaphore.makeUnsafe<ThreadId>({ permits: 1 });
 
@@ -451,6 +460,7 @@ const make = Effect.gen(function* () {
     readonly threadId: ThreadId;
     readonly messageId: MessageId;
     readonly turnId?: TurnId;
+    readonly handoff?: "steer";
     readonly acceptedAt: string;
   }) {
     yield* orchestrationEngine.dispatch({
@@ -459,6 +469,7 @@ const make = Effect.gen(function* () {
       threadId: input.threadId,
       messageId: input.messageId,
       ...(input.turnId !== undefined ? { turnId: input.turnId } : {}),
+      ...(input.handoff !== undefined ? { handoff: input.handoff } : {}),
       acceptedAt: input.acceptedAt,
     });
   });
@@ -466,6 +477,7 @@ const make = Effect.gen(function* () {
   const dispatchQueuedTurnFailed = Effect.fnUntraced(function* (input: {
     readonly threadId: ThreadId;
     readonly messageId: MessageId;
+    readonly handoff?: "steer";
     readonly failedAt: string;
   }) {
     yield* orchestrationEngine.dispatch({
@@ -473,6 +485,7 @@ const make = Effect.gen(function* () {
       commandId: yield* serverCommandId("queued-turn-failed"),
       threadId: input.threadId,
       messageId: input.messageId,
+      ...(input.handoff !== undefined ? { handoff: input.handoff } : {}),
       failedAt: input.failedAt,
     });
   });
@@ -1372,7 +1385,7 @@ const make = Effect.gen(function* () {
       }
       return yield* buildSendTurnRequestForThread({
         threadId: thread.id,
-        messageText: message.text,
+        messageText: buildQueuedFollowUpPrompt(message.text),
         ...(message.attachments !== undefined ? { attachments: message.attachments } : {}),
         ...(queuedRow.modelSelection !== null ? { modelSelection: queuedRow.modelSelection } : {}),
         interactionMode: queuedRow.interactionMode,
@@ -1437,6 +1450,7 @@ const make = Effect.gen(function* () {
         yield* dispatchQueuedTurnFailed({
           threadId: event.payload.threadId,
           messageId: event.payload.messageId,
+          handoff: "steer",
           failedAt: event.payload.createdAt,
         });
       }
@@ -1456,6 +1470,7 @@ const make = Effect.gen(function* () {
         yield* dispatchQueuedTurnFailed({
           threadId: event.payload.threadId,
           messageId: event.payload.messageId,
+          handoff: "steer",
           failedAt: event.payload.createdAt,
         });
       }
@@ -1465,7 +1480,9 @@ const make = Effect.gen(function* () {
       threadId: event.payload.threadId,
       expectedTurnId: event.payload.expectedTurnId,
       clientUserMessageId: message.id,
-      ...(message.text.trim().length > 0 ? { input: message.text } : {}),
+      ...(message.text.trim().length > 0
+        ? { input: isQueuedSteer ? buildQueuedFollowUpPrompt(message.text) : message.text }
+        : {}),
       ...(message.attachments !== undefined ? { attachments: message.attachments } : {}),
     };
     if (isQueuedSteer) {
@@ -1496,6 +1513,7 @@ const make = Effect.gen(function* () {
           threadId: event.payload.threadId,
           messageId: event.payload.messageId,
           turnId: result.value.turnId,
+          handoff: "steer",
           acceptedAt,
         });
       }

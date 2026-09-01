@@ -1045,10 +1045,28 @@ describe("applyThreadDetailEvent", () => {
       });
       expect(dispatched.kind).toBe("unchanged");
 
-      const accepted = applyThreadDetailEvent(queued.thread, {
+      const steered = applyThreadDetailEvent(queued.thread, {
         ...baseEventFields,
         sequence: 19,
         occurredAt: "2026-04-01T14:02:30.000Z",
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-1"),
+        type: "thread.queued-turn-steer-requested",
+        payload: {
+          threadId: ThreadId.make("thread-1"),
+          messageId: queuedMessage.id,
+          expectedTurnId: TurnId.make("turn-active"),
+          createdAt: "2026-04-01T14:02:30.000Z",
+        },
+      });
+      expect(steered.kind).toBe("updated");
+      if (steered.kind !== "updated") return;
+      expect(steered.thread.messages[0]?.deliveryState).toBeUndefined();
+
+      const accepted = applyThreadDetailEvent(steered.thread, {
+        ...baseEventFields,
+        sequence: 20,
+        occurredAt: "2026-04-01T14:02:45.000Z",
         aggregateKind: "thread",
         aggregateId: ThreadId.make("thread-1"),
         type: "thread.queued-turn-accepted",
@@ -1056,7 +1074,7 @@ describe("applyThreadDetailEvent", () => {
           threadId: ThreadId.make("thread-1"),
           messageId: queuedMessage.id,
           turnId: TurnId.make("turn-accepted"),
-          acceptedAt: "2026-04-01T14:02:30.000Z",
+          acceptedAt: "2026-04-01T14:02:45.000Z",
         },
       });
       expect(accepted.kind).toBe("updated");

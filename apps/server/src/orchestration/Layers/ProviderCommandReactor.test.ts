@@ -637,7 +637,7 @@ describe("ProviderCommandReactor", () => {
     expect(harness.interruptTurn).not.toHaveBeenCalled();
   });
 
-  it("settles a queued steer only after the provider accepts it", async () => {
+  it("removes a queued steer while the provider applies it", async () => {
     const harness = await createHarness();
     const now = "2026-01-01T00:00:00.000Z";
     await harness.runEffect(
@@ -693,6 +693,9 @@ describe("ProviderCommandReactor", () => {
       }),
     );
     await waitFor(() => harness.steerTurn.mock.calls.length === 1);
+    expect(harness.steerTurn.mock.calls[0]?.[0]).toMatchObject({
+      input: expect.stringContaining("User follow-up:\nsteer this next"),
+    });
     await waitFor(async () => {
       const message = (await harness.readModel()).threads[0]?.messages.find(
         (entry) => entry.id === asMessageId("queued-message-steer"),
@@ -839,7 +842,7 @@ describe("ProviderCommandReactor", () => {
     await waitFor(() => harness.sendTurn.mock.calls.length === 1);
     expect(harness.sendTurn.mock.calls[0]?.[0]).toMatchObject({
       threadId: ThreadId.make("thread-1"),
-      input: "send me next",
+      input: expect.stringContaining("User follow-up:\nsend me next"),
       forceNewTurn: true,
     });
   });
@@ -895,6 +898,9 @@ describe("ProviderCommandReactor", () => {
       }),
     );
     await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    expect(harness.sendTurn.mock.calls[0]?.[0]).toMatchObject({
+      input: expect.stringContaining("User follow-up:\nwait for acceptance"),
+    });
 
     const pending = (await harness.readModel()).threads[0]?.messages.find(
       (message) => message.id === asMessageId("queued-message-acceptance"),

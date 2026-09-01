@@ -1047,11 +1047,34 @@ describe("orchestration projector", () => {
       "queued-1",
     ]);
 
-    const accepted = await Effect.runPromise(
+    const steered = await Effect.runPromise(
       projectEvent(
         reordered,
         makeEvent({
           sequence: 3,
+          type: "thread.queued-turn-steer-requested",
+          aggregateKind: "thread",
+          aggregateId: "thread-reorder",
+          occurredAt: "2026-03-02T00:00:01.500Z",
+          commandId: "cmd-steer",
+          payload: {
+            threadId: "thread-reorder",
+            messageId: "queued-2",
+            expectedTurnId: "turn-active",
+            createdAt: "2026-03-02T00:00:01.500Z",
+          },
+        }),
+      ),
+    );
+    expect(
+      steered.threads[0]?.messages.find((message) => message.id === "queued-2")?.deliveryState,
+    ).toBeUndefined();
+
+    const accepted = await Effect.runPromise(
+      projectEvent(
+        steered,
+        makeEvent({
+          sequence: 4,
           type: "thread.queued-turn-accepted",
           aggregateKind: "thread",
           aggregateId: "thread-reorder",
@@ -1077,9 +1100,9 @@ describe("orchestration projector", () => {
 
     const failed = await Effect.runPromise(
       projectEvent(
-        reordered,
+        steered,
         makeEvent({
-          sequence: 4,
+          sequence: 5,
           type: "thread.queued-turn-failed",
           aggregateKind: "thread",
           aggregateId: "thread-reorder",

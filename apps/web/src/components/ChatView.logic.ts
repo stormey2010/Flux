@@ -218,6 +218,13 @@ export function buildThreadTurnInterruptInput(thread: Pick<Thread, "id" | "sessi
   };
 }
 
+const STOP_GENERATION_PROMPT_PATTERN =
+  /^(?:please\s+)?(?:stop|halt|abort|cancel)(?:\s+(?:now|this|that|it|generation|turn|answer|response))*[.!?]*$/iu;
+
+export function isStopGenerationPrompt(text: string): boolean {
+  return STOP_GENERATION_PROMPT_PATTERN.test(text.trim());
+}
+
 export function reconcileMountedTerminalThreadIds(input: {
   currentThreadIds: ReadonlyArray<string>;
   openThreadIds: ReadonlyArray<string>;

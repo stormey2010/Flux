@@ -22,6 +22,7 @@ import {
   ENVIRONMENT_RECONNECT_WARNING_GRACE_MS,
   getStartedThreadModelChangeBlockReason,
   hasEnvironmentReconnectWarningGraceElapsed,
+  isStopGenerationPrompt,
   hasServerAcknowledgedLocalDispatch,
   isBranchMismatchDismissedForSession,
   reconcileMountedTerminalThreadIds,
@@ -366,6 +367,19 @@ describe("buildThreadTurnInterruptInput", () => {
     expect(buildThreadTurnInterruptInput(makeThread({ session: readySession }))).toEqual({
       threadId,
     });
+  });
+});
+
+describe("isStopGenerationPrompt", () => {
+  it("recognizes short stop commands", () => {
+    expect(isStopGenerationPrompt("stop")).toBe(true);
+    expect(isStopGenerationPrompt("Please stop now.")).toBe(true);
+    expect(isStopGenerationPrompt("cancel this response")).toBe(true);
+  });
+
+  it("does not treat ordinary instructions containing stop as cancellation", () => {
+    expect(isStopGenerationPrompt("Stop using the old API and switch to the new one")).toBe(false);
+    expect(isStopGenerationPrompt("don't stop until the tests pass")).toBe(false);
   });
 });
 

@@ -618,10 +618,27 @@ export function projectEvent(
     }
 
     case "thread.queued-turn-dispatched":
-    case "thread.queued-turn-steer-requested":
       // Provider intent only. The user message remains queued until the
       // provider acceptance boundary emits queued-turn-accepted.
       return Effect.succeed(nextBase);
+
+    case "thread.queued-turn-steer-requested": {
+      const thread = nextBase.threads.find((entry) => entry.id === event.payload.threadId);
+      if (!thread) return Effect.succeed(nextBase);
+      return Effect.succeed({
+        ...nextBase,
+        threads: updateThread(nextBase.threads, event.payload.threadId, {
+          // The steer request has consumed the queue slot. A provider failure
+          // event restores the queued marker for retry.
+          messages: thread.messages.map((message) => {
+            if (message.id !== event.payload.messageId) return message;
+            const { deliveryState: _deliveryState, ...steeredMessage } = message;
+            return steeredMessage;
+          }),
+          updatedAt: event.occurredAt,
+        }),
+      });
+    }
 
     case "thread.queued-turn-accepted": {
       return decodeForEvent(
