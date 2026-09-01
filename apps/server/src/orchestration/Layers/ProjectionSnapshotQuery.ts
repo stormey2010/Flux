@@ -611,20 +611,23 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     Result: ProjectionThreadMessageDbRowSchema,
     execute: () => sql`
       SELECT
-        message_id AS "messageId",
-        thread_id AS "threadId",
-        turn_id AS "turnId",
-        role,
-        channel,
-        text,
-        attachments_json AS "attachments",
-        is_streaming AS "isStreaming",
-        delivery_state AS "deliveryState",
-        created_at AS "createdAt",
-        updated_at AS "updatedAt"
-      FROM projection_thread_messages
-      WHERE delivery_state = 'queued'
-      ORDER BY thread_id ASC, created_at ASC, message_id ASC
+        message.message_id AS "messageId",
+        message.thread_id AS "threadId",
+        message.turn_id AS "turnId",
+        message.role,
+        message.channel,
+        message.text,
+        message.attachments_json AS "attachments",
+        message.is_streaming AS "isStreaming",
+        message.delivery_state AS "deliveryState",
+        message.created_at AS "createdAt",
+        message.updated_at AS "updatedAt"
+      FROM projection_thread_messages AS message
+      INNER JOIN projection_thread_turn_queue AS queued_turn
+        ON queued_turn.message_id = message.message_id
+       AND queued_turn.thread_id = message.thread_id
+      WHERE message.delivery_state = 'queued'
+      ORDER BY message.thread_id ASC, queued_turn.queue_order ASC, message.message_id ASC
     `,
   });
 

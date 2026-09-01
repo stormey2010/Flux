@@ -1,4 +1,5 @@
-import { createElement } from "react";
+import { act, createElement } from "react";
+import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
@@ -105,6 +106,194 @@ function renderSendButton(sendDisabledReason: string | null = null) {
       onImplementPlanInNewThread: () => {},
     }),
   );
+}
+
+class TestNode {
+  parentNode: TestNode | null = null;
+  childNodes: TestNode[] = [];
+  readonly nodeName: string;
+  readonly tagName: string;
+  readonly namespaceURI = "http://www.w3.org/1999/xhtml";
+  readonly style = {};
+  readonly attributes = new Map<string, string>();
+  private readonly listeners = new Map<string, Set<(event: TestEvent) => void>>();
+
+  constructor(
+    name: string,
+    readonly ownerDocument: TestNode | null = null,
+    readonly nodeType = 1,
+  ) {
+    this.nodeName = name.toUpperCase();
+    this.tagName = this.nodeName;
+  }
+
+  set textContent(_value: string) {
+    this.childNodes = [];
+  }
+
+  appendChild(child: TestNode) {
+    child.parentNode = this;
+    this.childNodes.push(child);
+    return child;
+  }
+
+  insertBefore(child: TestNode, before: TestNode | null) {
+    child.parentNode = this;
+    const index = before === null ? -1 : this.childNodes.indexOf(before);
+    if (index === -1) this.childNodes.push(child);
+    else this.childNodes.splice(index, 0, child);
+    return child;
+  }
+
+  removeChild(child: TestNode) {
+    this.childNodes.splice(this.childNodes.indexOf(child), 1);
+    child.parentNode = null;
+    return child;
+  }
+
+  createElement(name: string) {
+    return new TestNode(name, this);
+  }
+
+  createElementNS(_namespace: string, name: string) {
+    return new TestNode(name, this);
+  }
+
+  createTextNode() {
+    return new TestNode("#text", this, 3);
+  }
+
+  addEventListener(type: string, listener: (event: TestEvent) => void) {
+    const listeners = this.listeners.get(type) ?? new Set();
+    listeners.add(listener);
+    this.listeners.set(type, listeners);
+  }
+
+  removeEventListener(type: string, listener: (event: TestEvent) => void) {
+    this.listeners.get(type)?.delete(listener);
+  }
+
+  dispatchEvent(event: TestEvent) {
+    event.target ??= this;
+    event.currentTarget = this;
+    for (const listener of this.listeners.get(event.type) ?? []) listener(event);
+    if (event.bubbles && !event.propagationStopped) this.parentNode?.dispatchEvent(event);
+    return !event.defaultPrevented;
+  }
+
+  setAttribute(name: string, value: string) {
+    this.attributes.set(name, value);
+  }
+
+  removeAttribute(name: string) {
+    this.attributes.delete(name);
+  }
+}
+
+type TestEvent = {
+  bubbles: boolean;
+  cancelable: boolean;
+  currentTarget: TestNode | null;
+  defaultPrevented: boolean;
+  propagationStopped?: boolean;
+  target: TestNode | null;
+  type: string;
+  preventDefault: () => void;
+  stopPropagation: () => void;
+};
+
+function installTestDom() {
+  const document = new TestNode("#document", null, 9);
+  const window = {
+    document,
+    HTMLIFrameElement: TestNode,
+    setInterval: globalThis.setInterval,
+    clearInterval: globalThis.clearInterval,
+    setTimeout: globalThis.setTimeout,
+    clearTimeout: globalThis.clearTimeout,
+    addEventListener() {},
+    removeEventListener() {},
+  };
+  vi.stubGlobal("document", document);
+  vi.stubGlobal("window", window);
+  vi.stubGlobal("HTMLIFrameElement", window.HTMLIFrameElement);
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  return document;
+}
+
+function findSubmitButton(node: TestNode): TestNode {
+  if (node.attributes.get("type") === "submit") return node;
+  for (const child of node.childNodes) {
+    try {
+      return findSubmitButton(child);
+    } catch {
+      // Continue searching sibling nodes.
+    }
+  }
+  throw new Error("Submit button not found");
+}
+
+function clickEvent(): TestEvent {
+  const event: TestEvent = {
+    bubbles: true,
+    cancelable: true,
+    currentTarget: null,
+    defaultPrevented: false,
+    propagationStopped: false,
+    target: null,
+    type: "click",
+    preventDefault() {
+      if (event.cancelable) event.defaultPrevented = true;
+    },
+    stopPropagation() {
+      event.propagationStopped = true;
+    },
+  };
+  return event;
+}
+
+async function clickActiveTurnAction(activeTurnMessageBehavior: "queue" | "steer") {
+  const document = installTestDom();
+  const container = document.createElement("div");
+  document.appendChild(container);
+  const root = createRoot(container as unknown as Element);
+  const onQueue = vi.fn();
+  const onSteer = vi.fn();
+
+  try {
+    await act(() => {
+      root.render(
+        createElement(ComposerPrimaryActions, {
+          compact: true,
+          pendingAction: null,
+          isRunning: true,
+          showPlanFollowUpPrompt: false,
+          promptHasText: true,
+          isSendBusy: false,
+          sendDisabledReason: null,
+          isConnecting: false,
+          isEnvironmentUnavailable: false,
+          isPreparingWorktree: false,
+          hasSendableContent: true,
+          activeTurnMessageBehavior,
+          onQueue,
+          onSteer,
+          onPreviousPendingQuestion: () => {},
+          onInterrupt: () => {},
+          onImplementPlanInNewThread: () => {},
+        }),
+      );
+    });
+
+    const submitButton = findSubmitButton(container);
+    await act(() => {
+      submitButton.dispatchEvent(clickEvent());
+    });
+    return { onQueue, onSteer };
+  } finally {
+    await act(() => root.unmount());
+    vi.unstubAllGlobals();
+  }
 }
 
 afterEach(() => {
@@ -275,7 +464,7 @@ describe("ComposerPrimaryActions", () => {
     expect(markup).toContain('aria-label="Queue message"');
   });
 
-  it("exposes the alternate queue action while steering is configured", () => {
+  it("labels the active-turn action as steer while steering is configured", () => {
     const markup = renderToStaticMarkup(
       createElement(ComposerPrimaryActions, {
         compact: true,
@@ -298,8 +487,20 @@ describe("ComposerPrimaryActions", () => {
       }),
     );
 
-    expect(markup).toContain('aria-label="Queue message"');
-    expect(markup).toContain("Queue message");
+    expect(markup).toContain('aria-label="Steer message"');
+    expect(markup).toContain("Steer message");
+  });
+
+  it("clicks onQueue for the active queue action", async () => {
+    const { onQueue, onSteer } = await clickActiveTurnAction("queue");
+    expect(onQueue).toHaveBeenCalledTimes(1);
+    expect(onSteer).not.toHaveBeenCalled();
+  });
+
+  it("clicks onSteer for the active steer action", async () => {
+    const { onQueue, onSteer } = await clickActiveTurnAction("steer");
+    expect(onSteer).toHaveBeenCalledTimes(1);
+    expect(onQueue).not.toHaveBeenCalled();
   });
 
   it("keeps queue available while the previous send is being projected", () => {

@@ -582,6 +582,18 @@ type ChatViewProps =
       draftId: DraftId;
     };
 
+export function shouldRemoveOptimisticQueuedMessage(
+  optimisticMessage: Pick<ChatMessage, "deliveryState">,
+  serverMessage: Pick<ChatMessage, "deliveryState" | "turnId"> | undefined,
+) {
+  return (
+    optimisticMessage.deliveryState !== "queued" ||
+    (serverMessage !== undefined &&
+      ((serverMessage.deliveryState !== undefined && serverMessage.deliveryState !== "queued") ||
+        serverMessage.turnId !== null))
+  );
+}
+
 interface TerminalLaunchContext {
   threadId: ThreadId;
   cwd: string;
@@ -1307,6 +1319,12 @@ function ChatViewContent(props: ChatViewProps) {
     reportFailure: false,
   });
   const editQueuedTurn = useAtomCommand(threadEnvironment.editQueuedTurn, {
+    reportFailure: false,
+  });
+  const reorderQueuedTurns = useAtomCommand(threadEnvironment.reorderQueuedTurns, {
+    reportFailure: false,
+  });
+  const resumeQueuedTurn = useAtomCommand(threadEnvironment.resumeQueuedTurn, {
     reportFailure: false,
   });
   const uploadThreadFeedback = useAtomCommand(threadEnvironment.uploadFeedback, {
@@ -2698,6 +2716,9 @@ function ChatViewContent(props: ChatViewProps) {
     feedbackSubmissions,
     optimisticUserMessages,
   ]);
+  const [editingQueuedMessageId, setEditingQueuedMessageId] = useState<MessageId | null>(null);
+  const [queuedMessageOrderOverride, setQueuedMessageOrderOverride] =
+    useState<ReadonlyArray<MessageId> | null>(null);
   const queuedMessages = useMemo(() => {
     const queuedById = new Map<MessageId, { id: MessageId; text: string }>();
     for (const message of timelineMessages) {
@@ -2710,17 +2731,52 @@ function ChatViewContent(props: ChatViewProps) {
         queuedById.set(message.id, { id: message.id, text: message.text });
       }
     }
-    return [...queuedById.values()];
-  }, [optimisticUserMessages, timelineMessages]);
+    const queued = [...queuedById.values()];
+    if (queuedMessageOrderOverride === null) return queued;
+    const queuedOrder = new Map(
+      queuedMessageOrderOverride.map((messageId, index) => [messageId, index]),
+    );
+    return queued.sort(
+      (left, right) =>
+        (queuedOrder.get(left.id) ?? Number.MAX_SAFE_INTEGER) -
+        (queuedOrder.get(right.id) ?? Number.MAX_SAFE_INTEGER),
+    );
+  }, [optimisticUserMessages, queuedMessageOrderOverride, timelineMessages]);
+  const optimisticQueuedMessageIds = useMemo(
+    () =>
+      new Set(
+        optimisticUserMessages.flatMap((message) =>
+          message.role === "user" && message.deliveryState === "queued" ? [message.id] : [],
+        ),
+      ),
+    [optimisticUserMessages],
+  );
+  // Queued follow-ups belong to the composer queue, not the conversation.
+  // They enter the timeline only after dispatch/steer clears deliveryState.
+  // Keeping the two surfaces separate also prevents a queued draft from
+  // looking like a provider-accepted user message while the active turn runs.
+  // The optimistic id also hides the server's message-sent event during the
+  // short gap before its turn-queued event arrives.
+  const visibleTimelineMessages = useMemo(
+    () =>
+      timelineMessages.filter(
+        (message) =>
+          !(
+            message.role === "user" &&
+            (message.deliveryState === "queued" || optimisticQueuedMessageIds.has(message.id))
+          ),
+      ),
+    [optimisticQueuedMessageIds, timelineMessages],
+  );
   const timelineEntries = useMemo(
     () =>
       deriveTimelineEntries(
-        timelineMessages,
+        visibleTimelineMessages,
         activeThread?.proposedPlans ?? [],
         workLogEntries,
         turnPlans,
       ),
-    [activeThread?.proposedPlans, timelineMessages, turnPlans, workLogEntries],
+    [activeThread?.proposedPlans, turnPlans, visibleTimelineMessages, workLogEntries],
   );
   const [dockedDraftHeroThreadKey, setDockedDraftHeroThreadKey] = useState<string | null>(null);
   const draftHeroDockRequested =
@@ -4334,12 +4390,12 @@ function ChatViewContent(props: ChatViewProps) {
     );
     const removedMessages = optimisticUserMessages.filter((message) => {
       if (!serverIds.has(message.id)) return false;
-      if (message.deliveryState !== "queued") return true;
       const serverMessage = serverMessagesById.get(message.id);
-      // Keep the optimistic queue marker while the ordinary message
-      // projection catches up. A dispatched queued message receives a turn id
-      // and can then be removed from the optimistic overlay.
-      return serverMessage?.deliveryState !== "queued" && serverMessage?.turnId !== null;
+      // The server publishes message-sent before turn-queued, so the matching
+      // server row can exist briefly without a delivery marker. Keep the
+      // optimistic queue row through that handoff; acceptance assigns a turn
+      // and is the first point where it belongs in the conversation.
+      return shouldRemoveOptimisticQueuedMessage(message, serverMessage);
     });
     if (removedMessages.length === 0) {
       return;
@@ -4348,9 +4404,8 @@ function ChatViewContent(props: ChatViewProps) {
       setOptimisticUserMessages((existing) =>
         existing.filter((message) => {
           if (!serverIds.has(message.id)) return true;
-          if (message.deliveryState !== "queued") return false;
           const serverMessage = serverMessagesById.get(message.id);
-          return !(serverMessage?.deliveryState !== "queued" && serverMessage?.turnId !== null);
+          return !shouldRemoveOptimisticQueuedMessage(message, serverMessage);
         }),
       );
     }, 0);
@@ -4375,6 +4430,8 @@ function ChatViewContent(props: ChatViewProps) {
       return [];
     });
     resetLocalDispatch();
+    setEditingQueuedMessageId(null);
+    setQueuedMessageOrderOverride(null);
     setExpandedImage(null);
   }, [draftId, resetLocalDispatch, threadId]);
 
@@ -5380,12 +5437,12 @@ function ChatViewContent(props: ChatViewProps) {
     },
   ) => {
     e?.preventDefault();
-    // The primary composer action is intentionally queue-first while a turn
-    // is active. Normalize the default form-submit intent here as well as in
-    // the UI so keyboard submit, mouse submit, and any future caller all use
-    // the same delivery contract.
+    // Normalize the default form-submit intent to the configured active-turn
+    // behavior so keyboard and pointer submissions use the same contract.
     const effectiveSubmissionIntent =
-      phase === "running" && submissionIntent === "foreground" ? "queue" : submissionIntent;
+      phase === "running" && submissionIntent === "foreground"
+        ? settings.activeTurnMessageBehavior
+        : submissionIntent;
     const canQueueWhileRunning = phase === "running" && effectiveSubmissionIntent === "queue";
     const notifyDirectAnnotationAttached = () => {
       if (!directAnnotation) return;
@@ -5478,6 +5535,61 @@ function ChatViewContent(props: ChatViewProps) {
         composerPreviewAnnotations.length +
         composerReviewComments.length,
     });
+    if (editingQueuedMessageId !== null) {
+      const hasUnsupportedEditContext =
+        composerImages.length > 0 ||
+        sendableComposerTerminalContexts.length > 0 ||
+        composerElementContexts.length > 0 ||
+        composerPreviewAnnotations.length > 0 ||
+        composerReviewComments.length > 0;
+      if (trimmed.length === 0 || hasUnsupportedEditContext) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "warning",
+            title:
+              trimmed.length === 0
+                ? "Queued message cannot be empty"
+                : "Edit the message text only",
+            description:
+              trimmed.length === 0
+                ? "Enter replacement text, then send to save the queued message."
+                : "Attachments and context on the queued message are preserved automatically.",
+          }),
+        );
+        return;
+      }
+      const editedAt = new Date().toISOString();
+      const result = await editQueuedTurn({
+        environmentId,
+        input: {
+          threadId: activeThread.id,
+          messageId: editingQueuedMessageId,
+          text: promptForSend,
+        },
+      });
+      if (result._tag === "Failure") {
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Could not edit queued message",
+            description: chatActionErrorMessage(squashAtomCommandFailure(result)),
+          }),
+        );
+        return;
+      }
+      setOptimisticUserMessages((existing) =>
+        existing.map((message) =>
+          message.id === editingQueuedMessageId
+            ? { ...message, text: promptForSend, updatedAt: editedAt }
+            : message,
+        ),
+      );
+      setEditingQueuedMessageId(null);
+      promptRef.current = "";
+      clearComposerDraftContent(composerDraftTarget);
+      composerRef.current?.resetCursorState({ cursor: 0 });
+      return;
+    }
     const feedbackCommand =
       ctxSelectedProvider === "codex" &&
       composerImages.length === 0 &&
@@ -6808,6 +6920,57 @@ function ChatViewContent(props: ChatViewProps) {
     },
     [activeThread, editQueuedTurn, environmentId],
   );
+  const onBeginEditQueuedMessage = useCallback(
+    (messageId: MessageId) => {
+      const message = queuedMessages.find((entry) => entry.id === messageId);
+      if (!message) return;
+      setEditingQueuedMessageId(messageId);
+      promptRef.current = message.text;
+      setComposerDraftPrompt(composerDraftTarget, message.text);
+      composerRef.current?.resetCursorState({ cursor: message.text.length });
+      window.requestAnimationFrame(() => composerRef.current?.focusAtEnd());
+    },
+    [composerDraftTarget, promptRef, queuedMessages, setComposerDraftPrompt],
+  );
+  const onReorderQueuedMessages = useCallback(
+    async (items: ReadonlyArray<{ id: MessageId; text: string }>) => {
+      if (!activeThread) return;
+      const messageIds = items.map((item) => item.id);
+      setQueuedMessageOrderOverride(messageIds);
+      const result = await reorderQueuedTurns({
+        environmentId,
+        input: { threadId: activeThread.id, messageIds },
+      });
+      if (result._tag === "Failure") {
+        setQueuedMessageOrderOverride(null);
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Could not reorder queued messages",
+            description: chatActionErrorMessage(squashAtomCommandFailure(result)),
+          }),
+        );
+      }
+    },
+    [activeThread, environmentId, reorderQueuedTurns],
+  );
+  const onResumeInterruptedQueue = useCallback(async () => {
+    const firstQueuedMessage = queuedMessages[0];
+    if (!activeThread || !firstQueuedMessage) return;
+    const result = await resumeQueuedTurn({
+      environmentId,
+      input: { threadId: activeThread.id, messageId: firstQueuedMessage.id },
+    });
+    if (result._tag === "Failure") {
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: "Could not resume queue",
+          description: chatActionErrorMessage(squashAtomCommandFailure(result)),
+        }),
+      );
+    }
+  }, [activeThread, environmentId, queuedMessages, resumeQueuedTurn]);
 
   // Empty state: no active thread
   if (!activeThread) {
@@ -7219,6 +7382,11 @@ function ChatViewContent(props: ChatViewProps) {
                             onCancelQueuedMessage={onCancelQueuedMessage}
                             onSteerQueuedMessage={onSteerQueuedMessage}
                             onEditQueuedMessage={onEditQueuedMessage}
+                            editingQueuedMessageId={editingQueuedMessageId}
+                            onBeginEditQueuedMessage={onBeginEditQueuedMessage}
+                            onReorderQueuedMessages={onReorderQueuedMessages}
+                            isQueuedTurnInterrupted={activeThread.session?.status === "interrupted"}
+                            onResumeInterruptedQueue={onResumeInterruptedQueue}
                             runtimeMode={runtimeMode}
                             interactionMode={interactionMode}
                             lockedProvider={lockedProvider}

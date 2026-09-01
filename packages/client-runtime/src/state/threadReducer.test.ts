@@ -1043,9 +1043,43 @@ describe("applyThreadDetailEvent", () => {
           dispatchedAt: "2026-04-01T14:02:00.000Z",
         },
       });
-      expect(dispatched.kind).toBe("updated");
-      if (dispatched.kind !== "updated") return;
-      expect(dispatched.thread.messages[0]?.deliveryState).toBeUndefined();
+      expect(dispatched.kind).toBe("unchanged");
+
+      const accepted = applyThreadDetailEvent(queued.thread, {
+        ...baseEventFields,
+        sequence: 19,
+        occurredAt: "2026-04-01T14:02:30.000Z",
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-1"),
+        type: "thread.queued-turn-accepted",
+        payload: {
+          threadId: ThreadId.make("thread-1"),
+          messageId: queuedMessage.id,
+          turnId: TurnId.make("turn-accepted"),
+          acceptedAt: "2026-04-01T14:02:30.000Z",
+        },
+      });
+      expect(accepted.kind).toBe("updated");
+      if (accepted.kind !== "updated") return;
+      expect(accepted.thread.messages[0]?.deliveryState).toBeUndefined();
+      expect(accepted.thread.messages[0]?.turnId).toBe("turn-accepted");
+
+      const failed = applyThreadDetailEvent(queued.thread, {
+        ...baseEventFields,
+        sequence: 19,
+        occurredAt: "2026-04-01T14:02:45.000Z",
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-1"),
+        type: "thread.queued-turn-failed",
+        payload: {
+          threadId: ThreadId.make("thread-1"),
+          messageId: queuedMessage.id,
+          failedAt: "2026-04-01T14:02:45.000Z",
+        },
+      });
+      expect(failed.kind).toBe("updated");
+      if (failed.kind !== "updated") return;
+      expect(failed.thread.messages[0]?.deliveryState).toBe("queued");
 
       const cancelled = applyThreadDetailEvent(queued.thread, {
         ...baseEventFields,
@@ -1063,6 +1097,49 @@ describe("applyThreadDetailEvent", () => {
       expect(cancelled.kind).toBe("updated");
       if (cancelled.kind === "updated") {
         expect(cancelled.thread.messages).toHaveLength(0);
+      }
+    });
+
+    it("reorders queued slots without changing delivered-message order", () => {
+      const deliveredOne = { ...queuedMessage, id: MessageId.make("delivered-1"), text: "one" };
+      const queuedOne = {
+        ...queuedMessage,
+        id: MessageId.make("queued-1"),
+        text: "queued one",
+        deliveryState: "queued" as const,
+      };
+      const deliveredTwo = { ...queuedMessage, id: MessageId.make("delivered-2"), text: "two" };
+      const queuedTwo = {
+        ...queuedMessage,
+        id: MessageId.make("queued-2"),
+        text: "queued two",
+        deliveryState: "queued" as const,
+      };
+      const result = applyThreadDetailEvent(
+        { ...baseThread, messages: [deliveredOne, queuedOne, deliveredTwo, queuedTwo] },
+        {
+          ...baseEventFields,
+          sequence: 20,
+          occurredAt: "2026-04-01T14:04:00.000Z",
+          aggregateKind: "thread",
+          aggregateId: ThreadId.make("thread-1"),
+          type: "thread.queued-turn-reordered",
+          payload: {
+            threadId: ThreadId.make("thread-1"),
+            messageIds: [queuedTwo.id, queuedOne.id],
+            updatedAt: "2026-04-01T14:04:00.000Z",
+          },
+        },
+      );
+
+      expect(result.kind).toBe("updated");
+      if (result.kind === "updated") {
+        expect(result.thread.messages.map((message) => message.id)).toEqual([
+          deliveredOne.id,
+          queuedTwo.id,
+          deliveredTwo.id,
+          queuedOne.id,
+        ]);
       }
     });
   });

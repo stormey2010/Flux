@@ -74,7 +74,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   isEnvironmentUnavailable,
   isPreparingWorktree,
   hasSendableContent,
-  activeTurnMessageBehavior: _activeTurnMessageBehavior = DEFAULT_ACTIVE_TURN_MESSAGE_BEHAVIOR,
+  activeTurnMessageBehavior = DEFAULT_ACTIVE_TURN_MESSAGE_BEHAVIOR,
   preserveComposerFocusOnPointerDown = false,
   onPreviousPendingQuestion,
   onInterrupt,
@@ -89,6 +89,9 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   const isSendDisabled = sendDisabledReason !== null;
   const canQueueWhileRunning = isRunning;
   const isSendBusyForCurrentAction = isSendBusy && !canQueueWhileRunning;
+  const activeTurnAction = activeTurnMessageBehavior === "steer" ? onSteer : onQueue;
+  const activeTurnActionLabel =
+    activeTurnMessageBehavior === "steer" ? "Steer message" : "Queue message";
   const stageBackdropVariant = useSidebarStageBackdropVariant(
     environmentIdentificationMode === "artwork",
   );
@@ -244,9 +247,9 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
       )}
       {...pointerFocusProps}
       onClick={(event) => {
-        if (isRunning && onQueue) {
+        if (isRunning && activeTurnAction) {
           event.preventDefault();
-          onQueue();
+          activeTurnAction();
         }
       }}
       disabled={
@@ -268,7 +271,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
                 : isSendBusyForCurrentAction
                   ? "Sending"
                   : isRunning
-                    ? "Queue message"
+                    ? activeTurnActionLabel
                     : "Send message"
       }
     >

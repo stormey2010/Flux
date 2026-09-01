@@ -332,6 +332,117 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
       ]);
     }),
   );
+
+  it.effect("keeps queued rows through handoff until an explicit provider outcome", () =>
+    Effect.gen(function* () {
+      const projectionPipeline = yield* OrchestrationProjectionPipeline;
+      const eventStore = yield* OrchestrationEventStore;
+      const sql = yield* SqlClient.SqlClient;
+      const threadId = ThreadId.make("thread-queue-boundary");
+      const messageId = MessageId.make("message-queue-boundary");
+      const now = "2026-01-01T00:00:00.000Z";
+      const appendAndProject = (event: Parameters<typeof eventStore.append>[0]) =>
+        eventStore
+          .append(event)
+          .pipe(Effect.flatMap((savedEvent) => projectionPipeline.projectEvent(savedEvent)));
+
+      yield* appendAndProject({
+        type: "thread.turn-queued",
+        eventId: EventId.make("evt-queue-boundary-queued"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: now,
+        commandId: CommandId.make("cmd-queue-boundary-queued"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-queue-boundary-queued"),
+        metadata: {},
+        payload: {
+          threadId,
+          messageId,
+          role: "user",
+          text: "queued boundary",
+          attachments: [],
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("codex"),
+            model: "gpt-5-codex",
+          },
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          createdAt: now,
+        },
+      });
+
+      const queueStatus = () =>
+        sql<{ readonly status: string }>`
+          SELECT status FROM projection_thread_turn_queue WHERE message_id = ${messageId}
+        `;
+      yield* appendAndProject({
+        type: "thread.queued-turn-dispatched",
+        eventId: EventId.make("evt-queue-boundary-dispatched"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: now,
+        commandId: CommandId.make("cmd-queue-boundary-dispatched"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-queue-boundary-dispatched"),
+        metadata: {},
+        payload: { threadId, messageId, dispatchedAt: now },
+      });
+      assert.deepEqual(yield* queueStatus(), [{ status: "handoff" }]);
+
+      yield* appendAndProject({
+        type: "thread.queued-turn-steer-requested",
+        eventId: EventId.make("evt-queue-boundary-steer"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: now,
+        commandId: CommandId.make("cmd-queue-boundary-steer"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-queue-boundary-steer"),
+        metadata: {},
+        payload: {
+          threadId,
+          messageId,
+          expectedTurnId: TurnId.make("turn-active"),
+          createdAt: now,
+        },
+      });
+      assert.deepEqual(yield* queueStatus(), [{ status: "handoff" }]);
+
+      yield* appendAndProject({
+        type: "thread.queued-turn-failed",
+        eventId: EventId.make("evt-queue-boundary-failed"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: now,
+        commandId: CommandId.make("cmd-queue-boundary-failed"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-queue-boundary-failed"),
+        metadata: {},
+        payload: { threadId, messageId, failedAt: now },
+      });
+      assert.deepEqual(yield* queueStatus(), [{ status: "queued" }]);
+
+      yield* appendAndProject({
+        type: "thread.queued-turn-accepted",
+        eventId: EventId.make("evt-queue-boundary-accepted"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: now,
+        commandId: CommandId.make("cmd-queue-boundary-accepted"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-queue-boundary-accepted"),
+        metadata: {},
+        payload: {
+          threadId,
+          messageId,
+          turnId: TurnId.make("turn-queue-boundary"),
+          acceptedAt: now,
+        },
+      });
+      assert.deepEqual(yield* queueStatus(), []);
+    }),
+  );
 });
 
 it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-base-")))(

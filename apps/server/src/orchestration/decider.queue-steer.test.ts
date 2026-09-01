@@ -227,6 +227,60 @@ it.layer(NodeServices.layer)("queued and steered turns", (it) => {
     }),
   );
 
+  it.effect("requires reorder to be a complete permutation of queued messages", () =>
+    Effect.gen(function* () {
+      const secondMessageId = MessageId.make("message-queue-test-2");
+      const readModel = makeReadModel({ queued: true });
+      const thread = readModel.threads[0]!;
+      const readModelWithTwoQueued = {
+        ...readModel,
+        threads: [
+          {
+            ...thread,
+            messages: [
+              ...thread.messages,
+              {
+                ...thread.messages[0]!,
+                id: secondMessageId,
+                text: "Run this after the first queued message",
+              },
+            ],
+          },
+        ],
+      };
+      const result = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.queued-turn.reorder",
+          commandId: CommandId.make("cmd-reorder-queued-turn"),
+          threadId: THREAD_ID,
+          messageIds: [secondMessageId, MESSAGE_ID],
+          createdAt: NOW,
+        },
+        readModel: readModelWithTwoQueued,
+      });
+      const events = Array.isArray(result) ? result : [result];
+      expect(events.map((event) => event.type)).toEqual(["thread.queued-turn-reordered"]);
+      expect(events[0]?.payload).toMatchObject({
+        threadId: THREAD_ID,
+        messageIds: [secondMessageId, MESSAGE_ID],
+      });
+
+      const rejected = yield* Effect.result(
+        decideOrchestrationCommand({
+          command: {
+            type: "thread.queued-turn.reorder",
+            commandId: CommandId.make("cmd-reorder-queued-turn-invalid"),
+            threadId: THREAD_ID,
+            messageIds: [MESSAGE_ID],
+            createdAt: NOW,
+          },
+          readModel: readModelWithTwoQueued,
+        }),
+      );
+      expect(rejected._tag).toBe("Failure");
+    }),
+  );
+
   it.effect("promotes a queued message to a steer request without duplicating it", () =>
     Effect.gen(function* () {
       const result = yield* decideOrchestrationCommand({
@@ -246,6 +300,53 @@ it.layer(NodeServices.layer)("queued and steered turns", (it) => {
         messageId: MESSAGE_ID,
         expectedTurnId: TURN_ID,
       });
+    }),
+  );
+
+  it.effect("emits explicit queued-turn outcome and resume events", () =>
+    Effect.gen(function* () {
+      const accepted = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.queued-turn.accept",
+          commandId: CommandId.make("cmd-queue-accept"),
+          threadId: THREAD_ID,
+          messageId: MESSAGE_ID,
+          turnId: TURN_ID,
+          acceptedAt: NOW,
+        },
+        readModel: makeReadModel({ queued: true }),
+      });
+      expect((Array.isArray(accepted) ? accepted : [accepted]).map((event) => event.type)).toEqual([
+        "thread.queued-turn-accepted",
+      ]);
+
+      const failed = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.queued-turn.fail",
+          commandId: CommandId.make("cmd-queue-fail"),
+          threadId: THREAD_ID,
+          messageId: MESSAGE_ID,
+          failedAt: NOW,
+        },
+        readModel: makeReadModel({ queued: true }),
+      });
+      expect((Array.isArray(failed) ? failed : [failed]).map((event) => event.type)).toEqual([
+        "thread.queued-turn-failed",
+      ]);
+
+      const resumed = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.queued-turn.resume",
+          commandId: CommandId.make("cmd-queue-resume"),
+          threadId: THREAD_ID,
+          messageId: MESSAGE_ID,
+          createdAt: NOW,
+        },
+        readModel: makeReadModel({ queued: true }),
+      });
+      expect((Array.isArray(resumed) ? resumed : [resumed]).map((event) => event.type)).toEqual([
+        "thread.queued-turn-resumed",
+      ]);
     }),
   );
 });

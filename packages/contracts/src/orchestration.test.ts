@@ -243,6 +243,93 @@ it.effect("decodes thread.turn.start defaults for provider and runtime mode", ()
   }),
 );
 
+it.effect("decodes queued-turn reorder commands and events", () =>
+  Effect.gen(function* () {
+    const command = yield* decodeClientOrchestrationCommand({
+      type: "thread.queued-turn.reorder",
+      commandId: "cmd-queue-reorder",
+      threadId: "thread-1",
+      messageIds: ["message-2", "message-1"],
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+    if (command.type !== "thread.queued-turn.reorder") {
+      assert.fail(`Expected queued-turn reorder, received ${command.type}.`);
+    }
+    assert.deepEqual(command.messageIds.map(String), ["message-2", "message-1"]);
+
+    const event = yield* decodeOrchestrationEvent({
+      sequence: 10,
+      eventId: "event-queue-reorder",
+      type: "thread.queued-turn-reordered",
+      aggregateKind: "thread",
+      aggregateId: "thread-1",
+      occurredAt: "2026-01-01T00:00:01.000Z",
+      commandId: "cmd-queue-reorder",
+      causationEventId: null,
+      correlationId: null,
+      metadata: {},
+      payload: {
+        threadId: "thread-1",
+        messageIds: ["message-2", "message-1"],
+        updatedAt: "2026-01-01T00:00:01.000Z",
+      },
+    });
+    assert.strictEqual(event.type, "thread.queued-turn-reordered");
+  }),
+);
+
+it.effect("decodes queued-turn acceptance, failure, and resume boundaries", () =>
+  Effect.gen(function* () {
+    const accepted = yield* decodeOrchestrationEvent({
+      sequence: 11,
+      eventId: "event-queue-accepted",
+      type: "thread.queued-turn-accepted",
+      aggregateKind: "thread",
+      aggregateId: "thread-1",
+      occurredAt: "2026-01-01T00:00:02.000Z",
+      commandId: "cmd-queue-accepted",
+      causationEventId: null,
+      correlationId: null,
+      metadata: {},
+      payload: {
+        threadId: "thread-1",
+        messageId: "message-1",
+        turnId: "turn-1",
+        acceptedAt: "2026-01-01T00:00:02.000Z",
+      },
+    });
+    assert.strictEqual(accepted.type, "thread.queued-turn-accepted");
+
+    const failed = yield* decodeOrchestrationEvent({
+      sequence: 12,
+      eventId: "event-queue-failed",
+      type: "thread.queued-turn-failed",
+      aggregateKind: "thread",
+      aggregateId: "thread-1",
+      occurredAt: "2026-01-01T00:00:03.000Z",
+      commandId: "cmd-queue-failed",
+      causationEventId: null,
+      correlationId: null,
+      metadata: {},
+      payload: {
+        threadId: "thread-1",
+        messageId: "message-1",
+        failedAt: "2026-01-01T00:00:03.000Z",
+      },
+    });
+    assert.strictEqual(failed.type, "thread.queued-turn-failed");
+
+    const resume = yield* decodeClientOrchestrationCommand({
+      type: "thread.queued-turn.resume",
+      commandId: "cmd-queue-resume",
+      threadId: "thread-1",
+      messageId: "message-1",
+      createdAt: "2026-01-01T00:00:04.000Z",
+    });
+    assert.strictEqual(resume.type, "thread.queued-turn.resume");
+  }),
+);
+
 it.effect("accepts both inline and uploaded image attachments from clients", () =>
   Effect.gen(function* () {
     const command = yield* decodeClientOrchestrationCommand({

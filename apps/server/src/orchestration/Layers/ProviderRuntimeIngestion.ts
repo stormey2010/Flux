@@ -1763,6 +1763,17 @@ const make = Effect.gen(function* () {
             // all — and applying it here stomps the "starting" lifecycle
             // state while a turn start is pending.
             return eventTurnId !== undefined;
+          case "turn.aborted":
+            if (conflictsWithActiveTurn || missingTurnForActiveTurn) {
+              return false;
+            }
+            // An abort is a terminal lifecycle signal just like a completion;
+            // only the active turn may move the session out of running.
+            if (activeTurnId !== null && eventTurnId !== undefined) {
+              return sameId(activeTurnId, eventTurnId);
+            }
+            // An untargeted abort cannot prove which turn it belongs to.
+            return eventTurnId !== undefined;
           default:
             return true;
         }
@@ -1803,7 +1814,8 @@ const make = Effect.gen(function* () {
         event.type === "session.exited" ||
         event.type === "thread.started" ||
         event.type === "turn.started" ||
-        event.type === "turn.completed"
+        event.type === "turn.completed" ||
+        event.type === "turn.aborted"
       ) {
         const status = (() => {
           switch (event.type) {
@@ -1819,6 +1831,8 @@ const make = Effect.gen(function* () {
               return normalizeRuntimeTurnState(event.payload.state) === "failed"
                 ? "error"
                 : "ready";
+            case "turn.aborted":
+              return "interrupted";
             case "session.started":
             case "thread.started":
               // Provider thread/session start notifications can arrive during an
@@ -1830,6 +1844,7 @@ const make = Effect.gen(function* () {
           event.type === "turn.started"
             ? (eventTurnId ?? null)
             : event.type === "turn.completed" ||
+                event.type === "turn.aborted" ||
                 event.type === "session.exited" ||
                 terminalSessionState
               ? null

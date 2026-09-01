@@ -36,6 +36,7 @@ layer("ProjectionQueuedTurnRepository", (it) => {
         eventId: EventId.make("event-first"),
         commandId: CommandId.make("command-first"),
         queuedAt: "2026-08-16T12:00:00.000Z",
+        queueOrder: 2,
         eventSequence: 2,
         status: "queued" as const,
       };
@@ -45,6 +46,7 @@ layer("ProjectionQueuedTurnRepository", (it) => {
         eventId: EventId.make("event-second"),
         commandId: CommandId.make("command-second"),
         queuedAt: "2026-08-16T11:59:00.000Z",
+        queueOrder: 1,
         eventSequence: 1,
         status: "queued" as const,
       };
@@ -57,6 +59,17 @@ layer("ProjectionQueuedTurnRepository", (it) => {
         [second.messageId, first.messageId],
       );
 
+      yield* repository.reorder({ threadId, messageIds: [first.messageId, second.messageId] });
+      const reordered = yield* repository.listByThreadId({ threadId });
+      assert.deepEqual(
+        reordered.map((row) => row.messageId),
+        [first.messageId, second.messageId],
+      );
+      assert.deepEqual(
+        reordered.map((row) => row.eventSequence),
+        [first.eventSequence, second.eventSequence],
+      );
+
       yield* repository.markHandoff({ messageId: first.messageId });
       yield* repository.markHandoff({ messageId: first.messageId });
       const transitioned = yield* repository.listByThreadId({ threadId });
@@ -66,6 +79,14 @@ layer("ProjectionQueuedTurnRepository", (it) => {
       );
       assert.equal(
         transitioned.find((row) => row.messageId === second.messageId)?.status,
+        "queued",
+      );
+
+      yield* repository.markQueued({ messageId: first.messageId });
+      assert.equal(
+        (yield* repository.listByThreadId({ threadId })).find(
+          (row) => row.messageId === first.messageId,
+        )?.status,
         "queued",
       );
 

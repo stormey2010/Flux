@@ -26,6 +26,8 @@ import {
   archiveThread,
   createProject,
   queueThreadTurn,
+  reorderQueuedThreadTurns,
+  resumeQueuedThreadTurn,
   settleThread,
   stopThreadSession,
   unsettleThread,
@@ -147,6 +149,54 @@ describe("environment commands", () => {
           commandId: "queue-command",
           threadId: "thread-1",
           message: { messageId: "message-1", text: "Wait for the current turn" },
+        },
+      ]);
+    }).pipe(Effect.provide(TEST_CRYPTO_LAYER)),
+  );
+
+  it.effect("dispatches complete queued-turn reorder commands", () =>
+    Effect.gen(function* () {
+      const dispatched: ClientOrchestrationCommand[] = [];
+      const supervisor = yield* makeSupervisor(dispatched);
+
+      yield* reorderQueuedThreadTurns({
+        commandId: CommandId.make("reorder-command"),
+        threadId: ThreadId.make("thread-1"),
+        messageIds: [MessageId.make("message-2"), MessageId.make("message-1")],
+        createdAt: "2026-06-06T00:02:00.000Z",
+      }).pipe(Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor));
+
+      expect(dispatched).toEqual([
+        {
+          type: "thread.queued-turn.reorder",
+          commandId: "reorder-command",
+          threadId: "thread-1",
+          messageIds: ["message-2", "message-1"],
+          createdAt: "2026-06-06T00:02:00.000Z",
+        },
+      ]);
+    }).pipe(Effect.provide(TEST_CRYPTO_LAYER)),
+  );
+
+  it.effect("dispatches explicit queued-turn resume commands", () =>
+    Effect.gen(function* () {
+      const dispatched: ClientOrchestrationCommand[] = [];
+      const supervisor = yield* makeSupervisor(dispatched);
+
+      yield* resumeQueuedThreadTurn({
+        commandId: CommandId.make("resume-command"),
+        threadId: ThreadId.make("thread-1"),
+        messageId: MessageId.make("message-1"),
+        createdAt: "2026-06-06T00:03:00.000Z",
+      }).pipe(Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor));
+
+      expect(dispatched).toEqual([
+        {
+          type: "thread.queued-turn.resume",
+          commandId: "resume-command",
+          threadId: "thread-1",
+          messageId: "message-1",
+          createdAt: "2026-06-06T00:03:00.000Z",
         },
       ]);
     }).pipe(Effect.provide(TEST_CRYPTO_LAYER)),

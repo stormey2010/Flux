@@ -1,10 +1,12 @@
 import {
   CommandId,
   EventId,
+  MessageId,
   ProjectId,
   ProviderDriverKind,
   ThreadId,
   type OrchestrationEvent,
+  type OrchestrationMessage,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import { describe, expect, it } from "vite-plus/test";
@@ -960,5 +962,139 @@ describe("orchestration projector", () => {
     expect(thread?.checkpoints).toHaveLength(500);
     expect(thread?.checkpoints[0]?.turnId).toBe("turn-100");
     expect(thread?.checkpoints.at(-1)?.turnId).toBe("turn-599");
+  });
+
+  it("reorders queued message slots while preserving delivered messages", async () => {
+    const now = "2026-03-02T00:00:00.000Z";
+    const afterCreate = await Effect.runPromise(
+      projectEvent(
+        createEmptyReadModel(now),
+        makeEvent({
+          sequence: 1,
+          type: "thread.created",
+          aggregateKind: "thread",
+          aggregateId: "thread-reorder",
+          occurredAt: now,
+          commandId: "cmd-create-reorder",
+          payload: {
+            threadId: "thread-reorder",
+            projectId: "project-1",
+            title: "reorder",
+            modelSelection: { provider: ProviderDriverKind.make("codex"), model: "gpt-5.4" },
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            branch: null,
+            worktreePath: null,
+            createdAt: now,
+            updatedAt: now,
+          },
+        }),
+      ),
+    );
+    const deliveredOne: OrchestrationMessage = {
+      id: MessageId.make("delivered-1"),
+      role: "assistant",
+      text: "one",
+      turnId: null,
+      streaming: false,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const queuedOne: OrchestrationMessage = {
+      ...deliveredOne,
+      id: MessageId.make("queued-1"),
+      deliveryState: "queued",
+    };
+    const deliveredTwo: OrchestrationMessage = {
+      ...deliveredOne,
+      id: MessageId.make("delivered-2"),
+      text: "two",
+    };
+    const queuedTwo: OrchestrationMessage = {
+      ...deliveredOne,
+      id: MessageId.make("queued-2"),
+      deliveryState: "queued",
+    };
+    const model = {
+      ...afterCreate,
+      threads: afterCreate.threads.map((thread) => ({
+        ...thread,
+        messages: [deliveredOne, queuedOne, deliveredTwo, queuedTwo],
+      })),
+    };
+    const reordered = await Effect.runPromise(
+      projectEvent(
+        model,
+        makeEvent({
+          sequence: 2,
+          type: "thread.queued-turn-reordered",
+          aggregateKind: "thread",
+          aggregateId: "thread-reorder",
+          occurredAt: "2026-03-02T00:00:01.000Z",
+          commandId: "cmd-reorder",
+          payload: {
+            threadId: "thread-reorder",
+            messageIds: ["queued-2", "queued-1"],
+            updatedAt: "2026-03-02T00:00:01.000Z",
+          },
+        }),
+      ),
+    );
+    expect(reordered.threads[0]?.messages.map((message) => message.id)).toEqual([
+      "delivered-1",
+      "queued-2",
+      "delivered-2",
+      "queued-1",
+    ]);
+
+    const accepted = await Effect.runPromise(
+      projectEvent(
+        reordered,
+        makeEvent({
+          sequence: 3,
+          type: "thread.queued-turn-accepted",
+          aggregateKind: "thread",
+          aggregateId: "thread-reorder",
+          occurredAt: "2026-03-02T00:00:02.000Z",
+          commandId: "cmd-accept",
+          payload: {
+            threadId: "thread-reorder",
+            messageId: "queued-2",
+            turnId: "turn-accepted",
+            acceptedAt: "2026-03-02T00:00:02.000Z",
+          },
+        }),
+      ),
+    );
+    expect(
+      accepted.threads[0]?.messages.find((message) => message.id === "queued-2"),
+    ).toMatchObject({
+      turnId: "turn-accepted",
+    });
+    expect(
+      accepted.threads[0]?.messages.find((message) => message.id === "queued-2")?.deliveryState,
+    ).toBeUndefined();
+
+    const failed = await Effect.runPromise(
+      projectEvent(
+        reordered,
+        makeEvent({
+          sequence: 4,
+          type: "thread.queued-turn-failed",
+          aggregateKind: "thread",
+          aggregateId: "thread-reorder",
+          occurredAt: "2026-03-02T00:00:03.000Z",
+          commandId: "cmd-fail",
+          payload: {
+            threadId: "thread-reorder",
+            messageId: "queued-1",
+            failedAt: "2026-03-02T00:00:03.000Z",
+          },
+        }),
+      ),
+    );
+    expect(
+      failed.threads[0]?.messages.find((message) => message.id === "queued-1")?.deliveryState,
+    ).toBe("queued");
   });
 });

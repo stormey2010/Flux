@@ -36,6 +36,26 @@ const activityOrder = O.combineAll<OrchestrationThreadActivity>([
   O.mapInput(O.String, (a) => a.id),
 ]);
 
+function reorderQueuedMessages(
+  messages: ReadonlyArray<OrchestrationMessage>,
+  orderedMessageIds: ReadonlyArray<MessageId>,
+): ReadonlyArray<OrchestrationMessage> {
+  const queuedMessages = messages.filter((message) => message.deliveryState === "queued");
+  const queuedById = new Map(queuedMessages.map((message) => [message.id, message]));
+  const reordered = orderedMessageIds.map((messageId) => queuedById.get(messageId));
+  if (
+    reordered.length !== queuedMessages.length ||
+    reordered.some((message) => message === undefined)
+  ) {
+    return messages;
+  }
+  let queuedIndex = 0;
+  return messages.map((message) => {
+    if (message.deliveryState !== "queued") return message;
+    return reordered[queuedIndex++] as OrchestrationMessage;
+  });
+}
+
 /**
  * Matches the validity rule in `deriveLatestContextWindowSnapshot` (and the
  * server's snapshot-side `dropStaleContextWindowActivities`): rows without a
@@ -285,6 +305,10 @@ export function applyThreadDetailEvent(
 
     case "thread.queued-turn-dispatched":
     case "thread.queued-turn-steer-requested":
+    case "thread.queued-turn-resumed":
+      return { kind: "unchanged" };
+
+    case "thread.queued-turn-accepted":
       return {
         kind: "updated",
         thread: {
@@ -292,8 +316,25 @@ export function applyThreadDetailEvent(
           messages: thread.messages.map((message) => {
             if (message.id !== event.payload.messageId) return message;
             const { deliveryState: _deliveryState, ...deliveredMessage } = message;
-            return deliveredMessage;
+            return {
+              ...deliveredMessage,
+              ...(event.payload.turnId !== undefined ? { turnId: event.payload.turnId } : {}),
+            };
           }),
+          updatedAt: event.occurredAt,
+        },
+      };
+
+    case "thread.queued-turn-failed":
+      return {
+        kind: "updated",
+        thread: {
+          ...thread,
+          messages: thread.messages.map((message) =>
+            message.id === event.payload.messageId
+              ? { ...message, deliveryState: "queued" as const }
+              : message,
+          ),
           updatedAt: event.occurredAt,
         },
       };
@@ -318,6 +359,17 @@ export function applyThreadDetailEvent(
               ? { ...message, text: event.payload.text, updatedAt: event.payload.updatedAt }
               : message,
           ),
+          updatedAt: event.occurredAt,
+        },
+      };
+
+    case "thread.queued-turn-reordered":
+      return {
+        kind: "updated",
+        thread: {
+          ...thread,
+          // Reorder queued slots only; delivered-message order remains stable.
+          messages: reorderQueuedMessages(thread.messages, event.payload.messageIds),
           updatedAt: event.occurredAt,
         },
       };

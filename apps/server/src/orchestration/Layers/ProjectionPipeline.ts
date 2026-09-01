@@ -1044,9 +1044,33 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
 
         case "thread.queued-turn-dispatched":
         case "thread.queued-turn-steer-requested":
+          // Provider intent only. Keep the message in the composer queue until
+          // the provider acceptance boundary commits queued-turn-accepted.
+          return;
+
+        case "thread.queued-turn-accepted": {
+          const existingMessage = yield* projectionThreadMessageRepository.getByMessageId({
+            messageId: event.payload.messageId,
+          });
           yield* projectionThreadMessageRepository.setDeliveryState({
             messageId: event.payload.messageId,
             deliveryState: null,
+          });
+          if (Option.isSome(existingMessage) && event.payload.turnId !== undefined) {
+            const { deliveryState: _deliveryState, ...acceptedMessage } = existingMessage.value;
+            yield* projectionThreadMessageRepository.upsert({
+              ...acceptedMessage,
+              turnId: event.payload.turnId,
+              updatedAt: event.payload.acceptedAt,
+            });
+          }
+          return;
+        }
+
+        case "thread.queued-turn-failed":
+          yield* projectionThreadMessageRepository.setDeliveryState({
+            messageId: event.payload.messageId,
+            deliveryState: "queued",
           });
           return;
 
@@ -1132,6 +1156,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             sourceProposedPlanThreadId: event.payload.sourceProposedPlan?.threadId ?? null,
             sourceProposedPlanId: event.payload.sourceProposedPlan?.planId ?? null,
             queuedAt: event.payload.createdAt,
+            queueOrder: event.sequence,
             eventSequence: event.sequence,
             status: "queued",
           });
@@ -1139,24 +1164,29 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         case "thread.queued-turn-dispatched":
           yield* projectionQueuedTurnRepository.markHandoff({ messageId: event.payload.messageId });
           return;
+        case "thread.queued-turn-accepted":
+          yield* projectionQueuedTurnRepository.deleteByMessageId({
+            messageId: event.payload.messageId,
+          });
+          return;
+        case "thread.queued-turn-failed":
+          yield* projectionQueuedTurnRepository.markQueued({ messageId: event.payload.messageId });
+          return;
         case "thread.queued-turn-cancelled":
           yield* projectionQueuedTurnRepository.deleteByMessageId({
             messageId: event.payload.messageId,
           });
           return;
-        case "thread.queued-turn-steer-requested":
-          yield* projectionQueuedTurnRepository.deleteByMessageId({
-            messageId: event.payload.messageId,
+        case "thread.queued-turn-reordered":
+          yield* projectionQueuedTurnRepository.reorder({
+            threadId: event.payload.threadId,
+            messageIds: event.payload.messageIds,
           });
           return;
+        case "thread.queued-turn-steer-requested":
+          yield* projectionQueuedTurnRepository.markHandoff({ messageId: event.payload.messageId });
+          return;
         case "thread.session-set":
-          if (
-            ["running", "error", "stopped", "interrupted"].includes(event.payload.session.status)
-          ) {
-            yield* projectionQueuedTurnRepository.deleteHandoffByThreadId({
-              threadId: event.payload.threadId,
-            });
-          }
           return;
         case "thread.deleted":
         case "thread.reverted":

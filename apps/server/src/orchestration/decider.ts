@@ -1162,6 +1162,64 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "thread.queued-turn.reorder": {
+      const thread = yield* requireThread({ readModel, command, threadId: command.threadId });
+      const queuedMessageIds = thread.messages
+        .filter((message) => message.deliveryState === "queued")
+        .map((message) => message.id);
+      const requestedMessageIds = command.messageIds;
+      const requestedSet = new Set(requestedMessageIds);
+      const matchesExactly =
+        requestedMessageIds.length === queuedMessageIds.length &&
+        requestedSet.size === requestedMessageIds.length &&
+        requestedMessageIds.every((messageId) => queuedMessageIds.includes(messageId));
+      if (!matchesExactly) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Queued message order must contain exactly the currently queued message IDs on thread '${command.threadId}'.`,
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.queued-turn-reordered",
+        payload: {
+          threadId: command.threadId,
+          messageIds: requestedMessageIds,
+          updatedAt: command.createdAt,
+        },
+      };
+    }
+
+    case "thread.queued-turn.resume": {
+      const thread = yield* requireThread({ readModel, command, threadId: command.threadId });
+      const message = thread.messages.find((entry) => entry.id === command.messageId);
+      if (message?.role !== "user" || message.deliveryState !== "queued") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Queued user message '${command.messageId}' does not exist on thread '${command.threadId}'.`,
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.queued-turn-resumed",
+        payload: {
+          threadId: command.threadId,
+          messageId: command.messageId,
+          resumedAt: command.createdAt,
+        },
+      };
+    }
+
     case "thread.queued-turn.steer": {
       const thread = yield* requireThread({ readModel, command, threadId: command.threadId });
       const message = thread.messages.find((entry) => entry.id === command.messageId);
@@ -1218,34 +1276,58 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           dispatchedAt: command.createdAt,
         },
       };
-      return [
-        dispatchedEvent,
-        {
-          ...(yield* withEventBase({
-            aggregateKind: "thread",
-            aggregateId: command.threadId,
-            occurredAt: command.createdAt,
-            commandId: command.commandId,
-          })),
-          causationEventId: dispatchedEvent.eventId,
-          type: "thread.turn-start-requested",
-          payload: {
-            threadId: command.threadId,
-            messageId: command.messageId,
-            ...(command.modelSelection !== undefined
-              ? { modelSelection: command.modelSelection }
-              : {}),
-            ...(command.titleSeed !== undefined ? { titleSeed: command.titleSeed } : {}),
-            runtimeMode: command.runtimeMode,
-            interactionMode: command.interactionMode,
-            ...(command.sourceProposedPlan !== undefined
-              ? { sourceProposedPlan: command.sourceProposedPlan }
-              : {}),
-            forceNewTurn: true,
-            createdAt: command.queuedAt,
-          },
+      return dispatchedEvent;
+    }
+
+    case "thread.queued-turn.accept": {
+      const thread = yield* requireThread({ readModel, command, threadId: command.threadId });
+      const message = thread.messages.find((entry) => entry.id === command.messageId);
+      if (message?.role !== "user" || message.deliveryState !== "queued") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Queued user message '${command.messageId}' is no longer waiting on thread '${command.threadId}'.`,
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.acceptedAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.queued-turn-accepted",
+        payload: {
+          threadId: command.threadId,
+          messageId: command.messageId,
+          ...(command.turnId !== undefined ? { turnId: command.turnId } : {}),
+          acceptedAt: command.acceptedAt,
         },
-      ];
+      };
+    }
+
+    case "thread.queued-turn.fail": {
+      const thread = yield* requireThread({ readModel, command, threadId: command.threadId });
+      const message = thread.messages.find((entry) => entry.id === command.messageId);
+      if (message?.role !== "user" || message.deliveryState !== "queued") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Queued user message '${command.messageId}' is no longer waiting on thread '${command.threadId}'.`,
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.failedAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.queued-turn-failed",
+        payload: {
+          threadId: command.threadId,
+          messageId: command.messageId,
+          failedAt: command.failedAt,
+        },
+      };
     }
 
     case "thread.turn.interrupt": {

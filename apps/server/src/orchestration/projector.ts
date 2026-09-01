@@ -1,4 +1,9 @@
-import type { OrchestrationEvent, OrchestrationReadModel, ThreadId } from "@t3tools/contracts";
+import type {
+  MessageId,
+  OrchestrationEvent,
+  OrchestrationReadModel,
+  ThreadId,
+} from "@t3tools/contracts";
 import {
   OrchestrationCheckpointSummary,
   OrchestrationMessage,
@@ -34,6 +39,9 @@ import {
   ThreadRevertedPayload,
   ThreadSessionSetPayload,
   ThreadTurnDiffCompletedPayload,
+  ThreadQueuedTurnReorderedPayload,
+  ThreadQueuedTurnAcceptedPayload,
+  ThreadQueuedTurnFailedPayload,
 } from "./Schemas.ts";
 
 type ThreadPatch = Partial<Omit<OrchestrationThread, "id" | "projectId">>;
@@ -75,6 +83,26 @@ function updateThread(
   patch: ThreadPatch,
 ): OrchestrationThread[] {
   return threads.map((thread) => (thread.id === threadId ? { ...thread, ...patch } : thread));
+}
+
+function reorderQueuedMessages(
+  messages: ReadonlyArray<OrchestrationMessage>,
+  orderedMessageIds: ReadonlyArray<MessageId>,
+): ReadonlyArray<OrchestrationMessage> {
+  const queuedMessages = messages.filter((message) => message.deliveryState === "queued");
+  const queuedById = new Map(queuedMessages.map((message) => [message.id, message]));
+  const reordered = orderedMessageIds.map((messageId) => queuedById.get(messageId));
+  if (
+    reordered.length !== queuedMessages.length ||
+    reordered.some((message) => message === undefined)
+  ) {
+    return messages;
+  }
+  let queuedIndex = 0;
+  return messages.map((message) => {
+    if (message.deliveryState !== "queued") return message;
+    return reordered[queuedIndex++] as OrchestrationMessage;
+  });
 }
 
 function decodeForEvent<A>(
@@ -590,20 +618,62 @@ export function projectEvent(
     }
 
     case "thread.queued-turn-dispatched":
-    case "thread.queued-turn-steer-requested": {
-      const thread = nextBase.threads.find((entry) => entry.id === event.payload.threadId);
-      if (!thread) return Effect.succeed(nextBase);
-      return Effect.succeed({
-        ...nextBase,
-        threads: updateThread(nextBase.threads, event.payload.threadId, {
-          messages: thread.messages.map((message) => {
-            if (message.id !== event.payload.messageId) return message;
-            const { deliveryState: _deliveryState, ...deliveredMessage } = message;
-            return deliveredMessage;
-          }),
-          updatedAt: event.occurredAt,
+    case "thread.queued-turn-steer-requested":
+      // Provider intent only. The user message remains queued until the
+      // provider acceptance boundary emits queued-turn-accepted.
+      return Effect.succeed(nextBase);
+
+    case "thread.queued-turn-accepted": {
+      return decodeForEvent(
+        ThreadQueuedTurnAcceptedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => {
+          const thread = nextBase.threads.find((entry) => entry.id === payload.threadId);
+          if (!thread) return nextBase;
+          return {
+            ...nextBase,
+            threads: updateThread(nextBase.threads, payload.threadId, {
+              messages: thread.messages.map((message) => {
+                if (message.id !== payload.messageId) return message;
+                const { deliveryState: _deliveryState, ...deliveredMessage } = message;
+                return {
+                  ...deliveredMessage,
+                  ...(payload.turnId !== undefined ? { turnId: payload.turnId } : {}),
+                };
+              }),
+              updatedAt: event.occurredAt,
+            }),
+          };
         }),
-      });
+      );
+    }
+
+    case "thread.queued-turn-failed": {
+      return decodeForEvent(
+        ThreadQueuedTurnFailedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => {
+          const thread = nextBase.threads.find((entry) => entry.id === payload.threadId);
+          if (!thread) return nextBase;
+          return {
+            ...nextBase,
+            threads: updateThread(nextBase.threads, payload.threadId, {
+              messages: thread.messages.map((message) =>
+                message.id === payload.messageId
+                  ? { ...message, deliveryState: "queued" as const }
+                  : message,
+              ),
+              updatedAt: event.occurredAt,
+            }),
+          };
+        }),
+      );
     }
 
     case "thread.queued-turn-cancelled": {
@@ -633,6 +703,28 @@ export function projectEvent(
         }),
       });
     }
+
+    case "thread.queued-turn-reordered":
+      return decodeForEvent(
+        ThreadQueuedTurnReorderedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => {
+          const thread = nextBase.threads.find((entry) => entry.id === payload.threadId);
+          if (!thread) return nextBase;
+          return {
+            ...nextBase,
+            threads: updateThread(nextBase.threads, payload.threadId, {
+              // Replace only queued slots. Delivered messages, including their
+              // relative order and positions, are left untouched.
+              messages: reorderQueuedMessages(thread.messages, payload.messageIds),
+              updatedAt: event.occurredAt,
+            }),
+          };
+        }),
+      );
 
     case "thread.session-set":
       return Effect.gen(function* () {

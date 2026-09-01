@@ -18,7 +18,7 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as SqlSchema from "effect/unstable/sql/SqlSchema";
 
-import { toPersistenceDecodeError, toPersistenceSqlError } from "./Errors.ts";
+import { PersistenceSqlError, toPersistenceDecodeError, toPersistenceSqlError } from "./Errors.ts";
 import type { ProjectionRepositoryError } from "./Errors.ts";
 
 export const ProjectionQueuedTurnStatus = Schema.Literals(["queued", "handoff"]);
@@ -36,6 +36,9 @@ export const ProjectionQueuedTurn = Schema.Struct({
   sourceProposedPlanThreadId: Schema.NullOr(ThreadId),
   sourceProposedPlanId: Schema.NullOr(OrchestrationProposedPlanId),
   queuedAt: IsoDateTime,
+  // Stable per-thread queue position. eventSequence remains immutable event
+  // provenance and is never changed by a reorder.
+  queueOrder: NonNegativeInt,
   eventSequence: NonNegativeInt,
   status: ProjectionQueuedTurnStatus,
 });
@@ -51,6 +54,9 @@ export class ProjectionQueuedTurnRepository extends Context.Service<
     readonly markHandoff: (
       input: typeof ProjectionQueuedTurnMessageInput.Type,
     ) => Effect.Effect<void, ProjectionRepositoryError>;
+    readonly markQueued: (
+      input: typeof ProjectionQueuedTurnMessageInput.Type,
+    ) => Effect.Effect<void, ProjectionRepositoryError>;
     readonly deleteByMessageId: (
       input: typeof ProjectionQueuedTurnMessageInput.Type,
     ) => Effect.Effect<void, ProjectionRepositoryError>;
@@ -60,6 +66,10 @@ export class ProjectionQueuedTurnRepository extends Context.Service<
     readonly deleteByThreadId: (
       input: typeof ProjectionQueuedTurnThreadInput.Type,
     ) => Effect.Effect<void, ProjectionRepositoryError>;
+    readonly reorder: (input: {
+      readonly threadId: ThreadId;
+      readonly messageIds: ReadonlyArray<MessageId>;
+    }) => Effect.Effect<void, ProjectionRepositoryError>;
     readonly listByThreadId: (
       input: typeof ProjectionQueuedTurnThreadInput.Type,
     ) => Effect.Effect<ReadonlyArray<ProjectionQueuedTurn>, ProjectionRepositoryError>;
@@ -81,13 +91,13 @@ const make = Effect.gen(function* () {
         message_id, thread_id, event_id, command_id, model_selection_json,
         title_seed, runtime_mode, interaction_mode,
         source_proposed_plan_thread_id, source_proposed_plan_id,
-        queued_at, event_sequence, status
+        queued_at, queue_order, event_sequence, status
       ) VALUES (
         ${row.messageId}, ${row.threadId}, ${row.eventId}, ${row.commandId},
         ${row.modelSelection === null ? null : JSON.stringify(row.modelSelection)},
         ${row.titleSeed}, ${row.runtimeMode}, ${row.interactionMode},
         ${row.sourceProposedPlanThreadId}, ${row.sourceProposedPlanId},
-        ${row.queuedAt}, ${row.eventSequence}, ${row.status}
+        ${row.queuedAt}, ${row.queueOrder}, ${row.eventSequence}, ${row.status}
       )
       ON CONFLICT (message_id) DO UPDATE SET
         thread_id = excluded.thread_id,
@@ -100,7 +110,6 @@ const make = Effect.gen(function* () {
         source_proposed_plan_thread_id = excluded.source_proposed_plan_thread_id,
         source_proposed_plan_id = excluded.source_proposed_plan_id,
         queued_at = excluded.queued_at,
-        event_sequence = excluded.event_sequence,
         status = excluded.status
     `,
   });
@@ -109,6 +118,13 @@ const make = Effect.gen(function* () {
     execute: ({ messageId }) => sql`
       UPDATE projection_thread_turn_queue SET status = 'handoff'
       WHERE message_id = ${messageId} AND status = 'queued'
+    `,
+  });
+  const markQueuedRow = SqlSchema.void({
+    Request: ProjectionQueuedTurnMessageInput,
+    execute: ({ messageId }) => sql`
+      UPDATE projection_thread_turn_queue SET status = 'queued'
+      WHERE message_id = ${messageId} AND status = 'handoff'
     `,
   });
   const deleteMessageRow = SqlSchema.void({
@@ -140,9 +156,10 @@ const make = Effect.gen(function* () {
         runtime_mode AS "runtimeMode", interaction_mode AS "interactionMode",
         source_proposed_plan_thread_id AS "sourceProposedPlanThreadId",
         source_proposed_plan_id AS "sourceProposedPlanId",
-        queued_at AS "queuedAt", event_sequence AS "eventSequence", status
+        queued_at AS "queuedAt", queue_order AS "queueOrder",
+        event_sequence AS "eventSequence", status
       FROM projection_thread_turn_queue WHERE thread_id = ${threadId}
-      ORDER BY event_sequence ASC`,
+      ORDER BY queue_order ASC, event_sequence ASC`,
   });
   const listAllRows = SqlSchema.findAll({
     Request: Schema.Void,
@@ -154,9 +171,65 @@ const make = Effect.gen(function* () {
       runtime_mode AS "runtimeMode", interaction_mode AS "interactionMode",
       source_proposed_plan_thread_id AS "sourceProposedPlanThreadId",
       source_proposed_plan_id AS "sourceProposedPlanId",
-      queued_at AS "queuedAt", event_sequence AS "eventSequence", status
-      FROM projection_thread_turn_queue ORDER BY event_sequence ASC`,
+      queued_at AS "queuedAt", queue_order AS "queueOrder",
+      event_sequence AS "eventSequence", status
+      FROM projection_thread_turn_queue ORDER BY thread_id ASC, queue_order ASC, event_sequence ASC`,
   });
+  const setQueueOrderRow = SqlSchema.void({
+    Request: Schema.Struct({ messageId: MessageId, queueOrder: NonNegativeInt }),
+    execute: ({ messageId, queueOrder }) => sql`
+      UPDATE projection_thread_turn_queue
+      SET queue_order = ${queueOrder}
+      WHERE message_id = ${messageId}
+    `,
+  });
+  const reorder: ProjectionQueuedTurnRepository["Service"]["reorder"] = ({
+    threadId,
+    messageIds,
+  }) =>
+    sql
+      .withTransaction(
+        Effect.gen(function* () {
+          const rows = yield* listThreadRows({ threadId });
+          const rowsById = new Map(rows.map((row) => [row.messageId, row]));
+          const requestedRows = messageIds.map((messageId) => rowsById.get(messageId));
+          if (
+            requestedRows.length !== rows.length ||
+            requestedRows.some((row) => row === undefined) ||
+            new Set(messageIds).size !== messageIds.length
+          ) {
+            return yield* Effect.fail(
+              new PersistenceSqlError({
+                operation: "ProjectionQueuedTurnRepository.reorder",
+                detail: `Queue reorder does not match persisted rows for thread '${threadId}'.`,
+              }),
+            );
+          }
+
+          // Move the keys out of the non-negative namespace first. This avoids
+          // transient UNIQUE(thread_id, queue_order) collisions while swapping
+          // the existing stable positions in one transaction.
+          yield* sql`
+          UPDATE projection_thread_turn_queue
+          SET queue_order = -queue_order - 1
+          WHERE thread_id = ${threadId}
+        `;
+          yield* Effect.forEach(
+            rows.map((row, index) => ({ messageId: row.messageId, queueOrder: index })),
+            setQueueOrderRow,
+          );
+          // Preserve the existing position values as the durable order keys;
+          // only their message ownership changes.
+          yield* Effect.forEach(
+            requestedRows.map((row, index) => ({
+              messageId: row!.messageId,
+              queueOrder: rows[index]!.queueOrder,
+            })),
+            setQueueOrderRow,
+          );
+        }),
+      )
+      .pipe(mapError("ProjectionQueuedTurnRepository.reorder:query"));
   const mapError = (operation: string) =>
     Effect.mapError((cause: unknown) =>
       Schema.isSchemaError(cause)
@@ -168,6 +241,8 @@ const make = Effect.gen(function* () {
       upsertRow(row).pipe(mapError("ProjectionQueuedTurnRepository.upsert:query")),
     markHandoff: (input: typeof ProjectionQueuedTurnMessageInput.Type) =>
       markHandoffRow(input).pipe(mapError("ProjectionQueuedTurnRepository.markHandoff:query")),
+    markQueued: (input: typeof ProjectionQueuedTurnMessageInput.Type) =>
+      markQueuedRow(input).pipe(mapError("ProjectionQueuedTurnRepository.markQueued:query")),
     deleteByMessageId: (input: typeof ProjectionQueuedTurnMessageInput.Type) =>
       deleteMessageRow(input).pipe(
         mapError("ProjectionQueuedTurnRepository.deleteByMessageId:query"),
@@ -180,6 +255,7 @@ const make = Effect.gen(function* () {
       deleteThreadRows(input).pipe(
         mapError("ProjectionQueuedTurnRepository.deleteByThreadId:query"),
       ),
+    reorder,
     listByThreadId: (input: typeof ProjectionQueuedTurnThreadInput.Type) =>
       listThreadRows(input).pipe(mapError("ProjectionQueuedTurnRepository.listByThreadId:query")),
     listAll: listAllRows(undefined).pipe(mapError("ProjectionQueuedTurnRepository.listAll:query")),

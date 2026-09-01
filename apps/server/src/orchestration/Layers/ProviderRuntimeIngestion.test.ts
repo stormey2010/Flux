@@ -378,6 +378,79 @@ describe("ProviderRuntimeIngestion", () => {
     expect(thread.session?.lastError).toBe("turn failed");
   });
 
+  it("moves the active session to interrupted when turn.aborted is terminal", async () => {
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
+    const turnId = asTurnId("turn-aborted");
+
+    harness.emit({
+      type: "turn.started",
+      eventId: asEventId("evt-turn-aborted-started"),
+      provider: ProviderDriverKind.make("codex"),
+      threadId: asThreadId("thread-1"),
+      createdAt: now,
+      turnId,
+    });
+    await waitForThread(
+      harness.readModel,
+      (thread) => thread.session?.status === "running" && thread.session.activeTurnId === turnId,
+    );
+
+    harness.emit({
+      type: "turn.aborted",
+      eventId: asEventId("evt-turn-aborted-terminal"),
+      provider: ProviderDriverKind.make("codex"),
+      threadId: asThreadId("thread-1"),
+      createdAt: "2026-01-01T00:00:01.000Z",
+      turnId,
+      payload: { reason: "cancelled" },
+    });
+
+    const thread = await waitForThread(
+      harness.readModel,
+      (entry) => entry.session?.status === "interrupted" && entry.session.activeTurnId === null,
+    );
+    expect(thread.session?.status).toBe("interrupted");
+    expect(thread.latestTurn?.state).toBe("interrupted");
+  });
+
+  it("ignores an aborted event for a turn that is no longer active", async () => {
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
+    const activeTurnId = asTurnId("turn-aborted-active");
+
+    harness.emit({
+      type: "turn.started",
+      eventId: asEventId("evt-turn-aborted-active-started"),
+      provider: ProviderDriverKind.make("codex"),
+      threadId: asThreadId("thread-1"),
+      createdAt: now,
+      turnId: activeTurnId,
+    });
+    await waitForThread(
+      harness.readModel,
+      (thread) =>
+        thread.session?.status === "running" && thread.session.activeTurnId === activeTurnId,
+    );
+
+    harness.emit({
+      type: "turn.aborted",
+      eventId: asEventId("evt-turn-aborted-stale"),
+      provider: ProviderDriverKind.make("codex"),
+      threadId: asThreadId("thread-1"),
+      createdAt: "2026-01-01T00:00:01.000Z",
+      turnId: asTurnId("turn-aborted-stale"),
+      payload: { reason: "cancelled" },
+    });
+    await harness.drain();
+
+    const thread = (await harness.readModel()).threads.find(
+      (entry) => entry.id === asThreadId("thread-1"),
+    );
+    expect(thread?.session?.status).toBe("running");
+    expect(thread?.session?.activeTurnId).toBe(activeTurnId);
+  });
+
   it("applies provider session.state.changed transitions directly", async () => {
     const harness = await createHarness();
     const waitingAt = "2026-01-01T00:00:00.000Z";

@@ -4,6 +4,7 @@ import {
   isReasoningMessage,
   CommandId,
   EventId,
+  MessageId,
   type ModelSelection,
   type OrchestrationEvent,
   ProviderDriverKind,
@@ -62,6 +63,8 @@ type ProviderIntentEvent = Extract<
       | "thread.meta-updated"
       | "thread.runtime-mode-set"
       | "thread.turn-queued"
+      | "thread.queued-turn-dispatched"
+      | "thread.queued-turn-resumed"
       | "thread.turn-start-requested"
       | "thread.turn-steer-requested"
       | "thread.queued-turn-steer-requested"
@@ -441,6 +444,36 @@ const make = Effect.gen(function* () {
         updatedAt: input.createdAt,
       },
       createdAt: input.createdAt,
+    });
+  });
+
+  const dispatchQueuedTurnAccepted = Effect.fnUntraced(function* (input: {
+    readonly threadId: ThreadId;
+    readonly messageId: MessageId;
+    readonly turnId?: TurnId;
+    readonly acceptedAt: string;
+  }) {
+    yield* orchestrationEngine.dispatch({
+      type: "thread.queued-turn.accept",
+      commandId: yield* serverCommandId("queued-turn-accepted"),
+      threadId: input.threadId,
+      messageId: input.messageId,
+      ...(input.turnId !== undefined ? { turnId: input.turnId } : {}),
+      acceptedAt: input.acceptedAt,
+    });
+  });
+
+  const dispatchQueuedTurnFailed = Effect.fnUntraced(function* (input: {
+    readonly threadId: ThreadId;
+    readonly messageId: MessageId;
+    readonly failedAt: string;
+  }) {
+    yield* orchestrationEngine.dispatch({
+      type: "thread.queued-turn.fail",
+      commandId: yield* serverCommandId("queued-turn-failed"),
+      threadId: input.threadId,
+      messageId: input.messageId,
+      failedAt: input.failedAt,
     });
   });
 
@@ -1246,12 +1279,148 @@ const make = Effect.gen(function* () {
       .pipe(Effect.catchCause(recoverTurnStartFailure), Effect.forkScoped);
   });
 
+  const processQueuedTurnDispatched = Effect.fn("processQueuedTurnDispatched")(function* (
+    event: Extract<ProviderIntentEvent, { type: "thread.queued-turn-dispatched" }>,
+  ) {
+    const queuedRow = (yield* projectionQueuedTurnRepository.listByThreadId({
+      threadId: event.payload.threadId,
+    })).find((row) => row.messageId === event.payload.messageId);
+    // A missing durable row means this intent was already settled, cancelled,
+    // or recovered. The projection may still report queued for this same event
+    // until its handoff update becomes visible, so do not require that status.
+    if (queuedRow === undefined) return;
+
+    const reportFailure = (detail: string, turnId: TurnId | null = null) =>
+      Effect.gen(function* () {
+        const thread = yield* resolveThread(event.payload.threadId);
+        if (thread !== undefined) {
+          yield* setThreadSessionErrorOnTurnStartFailure({
+            threadId: event.payload.threadId,
+            detail,
+            createdAt: event.payload.dispatchedAt,
+          }).pipe(
+            Effect.catchCause((cause) =>
+              Effect.logWarning("provider command reactor failed to mark queued turn failure", {
+                threadId: event.payload.threadId,
+                cause: Cause.pretty(cause),
+              }),
+            ),
+          );
+        }
+        yield* appendProviderFailureActivity({
+          threadId: event.payload.threadId,
+          kind: "provider.turn.start.failed",
+          summary: "Provider turn start failed",
+          detail,
+          turnId,
+          createdAt: event.payload.dispatchedAt,
+        }).pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning("provider command reactor failed to append queued turn failure", {
+              threadId: event.payload.threadId,
+              cause: Cause.pretty(cause),
+            }),
+          ),
+        );
+        const failedAt = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
+        yield* dispatchQueuedTurnFailed({
+          threadId: event.payload.threadId,
+          messageId: event.payload.messageId,
+          failedAt,
+        });
+      });
+
+    const thread = yield* resolveThread(event.payload.threadId);
+    if (thread === undefined) return;
+    const message = thread.messages.find((entry) => entry.id === event.payload.messageId);
+    if (!message || message.role !== "user") {
+      yield* reportFailure(
+        `User message '${event.payload.messageId}' was not found for queued turn dispatch.`,
+      );
+      return;
+    }
+
+    const preparedRequest = Effect.gen(function* () {
+      yield* ensureThreadWorktree(thread);
+      const isFirstUserMessageTurn =
+        thread.messages.filter((entry) => entry.role === "user").length === 1;
+      if (isFirstUserMessageTurn) {
+        const project = yield* resolveProject(thread.projectId);
+        const generationCwd =
+          resolveThreadWorkspaceCwd({
+            thread,
+            projects: project ? [project] : [],
+          }) ?? process.cwd();
+        const generationInput = {
+          messageText: message.text,
+          ...(message.attachments !== undefined ? { attachments: message.attachments } : {}),
+          ...(queuedRow.titleSeed !== null ? { titleSeed: queuedRow.titleSeed } : {}),
+        };
+        yield* maybeGenerateAndRenameWorktreeBranchForFirstTurn({
+          threadId: thread.id,
+          branch: thread.branch,
+          worktreePath: thread.worktreePath,
+          ...generationInput,
+        }).pipe(Effect.forkScoped);
+        if (canReplaceThreadTitle(thread.title, queuedRow.titleSeed ?? undefined)) {
+          yield* maybeGenerateThreadTitleForFirstTurn({
+            threadId: thread.id,
+            cwd: generationCwd,
+            ...generationInput,
+          }).pipe(Effect.forkScoped);
+        }
+      }
+      return yield* buildSendTurnRequestForThread({
+        threadId: thread.id,
+        messageText: message.text,
+        ...(message.attachments !== undefined ? { attachments: message.attachments } : {}),
+        ...(queuedRow.modelSelection !== null ? { modelSelection: queuedRow.modelSelection } : {}),
+        interactionMode: queuedRow.interactionMode,
+        forceNewTurn: true,
+        createdAt: event.payload.dispatchedAt,
+      });
+    });
+
+    const request = yield* preparedRequest.pipe(
+      Effect.map(Option.some),
+      Effect.catchCause((cause) =>
+        reportFailure(formatFailureDetail(cause)).pipe(Effect.as(Option.none())),
+      ),
+    );
+    if (Option.isNone(request)) return;
+
+    const result = yield* providerService.sendTurn(request.value).pipe(
+      Effect.map(Option.some),
+      Effect.catchCause((cause) =>
+        reportFailure(formatFailureDetail(cause)).pipe(Effect.as(Option.none())),
+      ),
+    );
+    if (Option.isNone(result)) return;
+
+    const acceptedAt = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
+    // If this command cannot be durably recorded, leave the handoff in place;
+    // startup recovery will surface it as ambiguous instead of replaying it.
+    yield* dispatchQueuedTurnAccepted({
+      threadId: event.payload.threadId,
+      messageId: event.payload.messageId,
+      turnId: result.value.turnId,
+      acceptedAt,
+    });
+  });
+
   const processTurnSteerRequested = Effect.fn("processTurnSteerRequested")(function* (
     event: Extract<
       ProviderIntentEvent,
       { type: "thread.turn-steer-requested" | "thread.queued-turn-steer-requested" }
     >,
   ) {
+    const isQueuedSteer = event.type === "thread.queued-turn-steer-requested";
+    if (isQueuedSteer) {
+      const queuedRow = (yield* projectionQueuedTurnRepository.listByThreadId({
+        threadId: event.payload.threadId,
+      })).find((row) => row.messageId === event.payload.messageId);
+      if (queuedRow === undefined) return;
+    }
     const thread = yield* resolveThread(event.payload.threadId);
     if (!thread) return;
     const message = thread.messages.find((entry) => entry.id === event.payload.messageId);
@@ -1264,6 +1433,13 @@ const make = Effect.gen(function* () {
         turnId: event.payload.expectedTurnId,
         createdAt: event.payload.createdAt,
       });
+      if (isQueuedSteer) {
+        yield* dispatchQueuedTurnFailed({
+          threadId: event.payload.threadId,
+          messageId: event.payload.messageId,
+          failedAt: event.payload.createdAt,
+        });
+      }
       return;
     }
     const steerTurn = providerService.steerTurn;
@@ -1276,15 +1452,56 @@ const make = Effect.gen(function* () {
         turnId: event.payload.expectedTurnId,
         createdAt: event.payload.createdAt,
       });
+      if (isQueuedSteer) {
+        yield* dispatchQueuedTurnFailed({
+          threadId: event.payload.threadId,
+          messageId: event.payload.messageId,
+          failedAt: event.payload.createdAt,
+        });
+      }
       return;
     }
-    yield* steerTurn({
+    const request = {
       threadId: event.payload.threadId,
       expectedTurnId: event.payload.expectedTurnId,
       clientUserMessageId: message.id,
       ...(message.text.trim().length > 0 ? { input: message.text } : {}),
       ...(message.attachments !== undefined ? { attachments: message.attachments } : {}),
-    }).pipe(
+    };
+    if (isQueuedSteer) {
+      const result = yield* steerTurn(request).pipe(
+        Effect.map(Option.some),
+        Effect.catchCause((cause) =>
+          Effect.gen(function* () {
+            const detail = formatFailureDetail(cause);
+            yield* appendProviderFailureActivity({
+              threadId: event.payload.threadId,
+              kind: "provider.turn.steer.failed",
+              summary: "Provider turn steer failed",
+              detail,
+              turnId: event.payload.expectedTurnId,
+              createdAt: event.payload.createdAt,
+            });
+            yield* dispatchQueuedTurnFailed({
+              threadId: event.payload.threadId,
+              messageId: event.payload.messageId,
+              failedAt: event.payload.createdAt,
+            });
+          }).pipe(Effect.as(Option.none())),
+        ),
+      );
+      if (Option.isSome(result)) {
+        const acceptedAt = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
+        yield* dispatchQueuedTurnAccepted({
+          threadId: event.payload.threadId,
+          messageId: event.payload.messageId,
+          turnId: result.value.turnId,
+          acceptedAt,
+        });
+      }
+      return;
+    }
+    yield* steerTurn(request).pipe(
       Effect.catchCause((cause) =>
         appendProviderFailureActivity({
           threadId: event.payload.threadId,
@@ -1335,6 +1552,7 @@ const make = Effect.gen(function* () {
 
   const tryDispatchNextQueuedTurn = Effect.fn("tryDispatchNextQueuedTurn")(function* (
     threadId: ThreadId,
+    allowInterrupted = false,
   ) {
     return yield* queuedTurnDrainLock.withPermit(threadId)(
       Effect.gen(function* () {
@@ -1344,7 +1562,12 @@ const make = Effect.gen(function* () {
         if (next === undefined) return;
         const thread = yield* resolveThread(threadId);
         if (thread === undefined) return;
-        if (isBlockingSessionStatus(thread.session?.status)) return;
+        if (
+          isBlockingSessionStatus(thread.session?.status) ||
+          (!allowInterrupted && thread.session?.status === "interrupted")
+        ) {
+          return;
+        }
         const createdAt = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
         // The original command id belongs to the durable queue request and has
         // already been acknowledged by the orchestration engine. Reusing it here
@@ -1464,9 +1687,24 @@ const make = Effect.gen(function* () {
       });
     };
 
-    // Orchestration turn ids are not provider turn ids, so interrupt by session.
+    // Re-read immediately before crossing the provider boundary. The command
+    // may have been accepted while turn A was active but processed after turn
+    // B replaced it; never let that stale command interrupt the newer turn.
+    const latestThread = yield* resolveThread(event.payload.threadId);
+    const latestSession = latestThread?.session;
+    if (!latestSession || latestSession.status === "stopped") {
+      return;
+    }
+    if (event.payload.turnId !== undefined && latestSession.activeTurnId !== event.payload.turnId) {
+      return;
+    }
+
+    const targetTurnId = event.payload.turnId ?? latestSession.activeTurnId ?? undefined;
     yield* providerService
-      .interruptTurn({ threadId: event.payload.threadId })
+      .interruptTurn({
+        threadId: event.payload.threadId,
+        ...(targetTurnId !== undefined ? { turnId: targetTurnId } : {}),
+      })
       .pipe(Effect.catchCause(recoverInterruptFailure));
   });
 
@@ -1620,6 +1858,12 @@ const make = Effect.gen(function* () {
       case "thread.turn-queued":
         yield* tryDispatchNextQueuedTurn(event.payload.threadId);
         return;
+      case "thread.queued-turn-dispatched":
+        yield* processQueuedTurnDispatched(event);
+        return;
+      case "thread.queued-turn-resumed":
+        yield* tryDispatchNextQueuedTurn(event.payload.threadId, true);
+        return;
       case "thread.turn-start-requested":
         yield* processTurnStartRequested(event);
         return;
@@ -1640,7 +1884,10 @@ const make = Effect.gen(function* () {
         yield* processSessionStopRequested(event);
         return;
       case "thread.session-set":
-        if (!isBlockingSessionStatus(event.payload.session.status)) {
+        if (
+          event.payload.session.status !== "interrupted" &&
+          !isBlockingSessionStatus(event.payload.session.status)
+        ) {
           yield* tryDispatchNextQueuedTurn(event.payload.threadId);
         }
         return;
@@ -1679,6 +1926,8 @@ const make = Effect.gen(function* () {
         (event.type === "thread.meta-updated" && event.payload.regenerateTitle === true) ||
         event.type === "thread.runtime-mode-set" ||
         event.type === "thread.turn-queued" ||
+        event.type === "thread.queued-turn-dispatched" ||
+        event.type === "thread.queued-turn-resumed" ||
         event.type === "thread.turn-start-requested" ||
         event.type === "thread.turn-steer-requested" ||
         event.type === "thread.queued-turn-steer-requested" ||
