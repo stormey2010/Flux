@@ -16,6 +16,7 @@ import {
   type ThreadId,
   type TurnId,
   type KeybindingCommand,
+  MAX_QUEUED_MESSAGES,
   OrchestrationThreadActivity,
   ProviderInteractionMode,
   ProviderDriverKind,
@@ -341,7 +342,6 @@ import {
   hasEnvironmentReconnectWarningGraceElapsed,
   scheduleEnvironmentReconnectWarning,
   hasServerAcknowledgedLocalDispatch,
-  isStopGenerationPrompt,
   isBranchMismatchDismissedForSession,
   shouldDockDraftHeroForSubmission,
   shouldReleaseTimelineAnchorForToolActivity,
@@ -590,9 +590,21 @@ export function shouldRemoveOptimisticQueuedMessage(
   return (
     optimisticMessage.deliveryState !== "queued" ||
     (serverMessage !== undefined &&
-      ((serverMessage.deliveryState !== undefined && serverMessage.deliveryState !== "queued") ||
-        serverMessage.turnId !== null))
+      (serverMessage.deliveryState !== undefined || serverMessage.turnId !== null))
   );
+}
+
+export function shouldKeepOptimisticQueuedMessage(
+  optimisticMessage: Pick<ChatMessage, "deliveryState">,
+  serverMessage: Pick<ChatMessage, "deliveryState" | "turnId"> | undefined,
+) {
+  return !shouldRemoveOptimisticQueuedMessage(optimisticMessage, serverMessage);
+}
+
+export function shouldKeepAuthoritativeQueuedMessage(
+  message: Pick<ChatMessage, "deliveryState" | "turnId">,
+) {
+  return message.deliveryState === "queued" && message.turnId === null;
 }
 
 interface TerminalLaunchContext {
@@ -1258,14 +1270,6 @@ function chatActionErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "An error occurred.";
 }
 
-function isStaleQueuedMessageCommandError(error: unknown): boolean {
-  return (
-    error instanceof Error &&
-    error.message.includes("Queued user message") &&
-    error.message.includes("does not exist on thread")
-  );
-}
-
 /**
  * Drops the send-time anchored end space. That space is what holds a sent
  * message near the top while its turn streams, and it keeps LegendList's
@@ -1320,7 +1324,6 @@ function ChatViewContent(props: ChatViewProps) {
   });
   const startThreadTurn = useAtomCommand(threadEnvironment.startTurn, { reportFailure: false });
   const queueThreadTurn = useAtomCommand(threadEnvironment.queueTurn, { reportFailure: false });
-  const steerThreadTurn = useAtomCommand(threadEnvironment.steerTurn, { reportFailure: false });
   const steerQueuedTurn = useAtomCommand(threadEnvironment.steerQueuedTurn, {
     reportFailure: false,
   });
@@ -2725,40 +2728,68 @@ function ChatViewContent(props: ChatViewProps) {
     feedbackSubmissions,
     optimisticUserMessages,
   ]);
-  const [editingQueuedMessageId, setEditingQueuedMessageId] = useState<MessageId | null>(null);
   const [queuedMessageOrderOverride, setQueuedMessageOrderOverride] =
     useState<ReadonlyArray<MessageId> | null>(null);
+  const queuedMessageFailure =
+    activeThread?.session?.status === "error" ? activeThread.session.lastError : null;
   const queuedMessages = useMemo(() => {
     const queuedById = new Map<MessageId, { id: MessageId; text: string }>();
+    const serverMessagesById = new Map(
+      displayServerMessages.map((message) => [message.id, message]),
+    );
     for (const message of timelineMessages) {
-      if (message.role === "user" && message.deliveryState === "queued") {
+      if (message.role === "user" && shouldKeepAuthoritativeQueuedMessage(message)) {
         queuedById.set(message.id, { id: message.id, text: message.text });
       }
     }
     for (const message of optimisticUserMessages) {
-      if (message.role === "user" && message.deliveryState === "queued") {
+      if (
+        message.role === "user" &&
+        message.deliveryState === "queued" &&
+        shouldKeepOptimisticQueuedMessage(message, serverMessagesById.get(message.id))
+      ) {
         queuedById.set(message.id, { id: message.id, text: message.text });
       }
     }
     const queued = [...queuedById.values()];
-    if (queuedMessageOrderOverride === null) return queued;
-    const queuedOrder = new Map(
-      queuedMessageOrderOverride.map((messageId, index) => [messageId, index]),
+    const queuedOrder =
+      queuedMessageOrderOverride === null
+        ? null
+        : new Map(queuedMessageOrderOverride.map((messageId, index) => [messageId, index]));
+    const ordered =
+      queuedOrder === null
+        ? queued
+        : queued.sort(
+            (left, right) =>
+              (queuedOrder.get(left.id) ?? Number.MAX_SAFE_INTEGER) -
+              (queuedOrder.get(right.id) ?? Number.MAX_SAFE_INTEGER),
+          );
+    if (!queuedMessageFailure || ordered.length === 0) return ordered;
+    return ordered.map((message, index) =>
+      index === 0 ? { ...message, pausedReason: queuedMessageFailure } : message,
     );
-    return queued.sort(
-      (left, right) =>
-        (queuedOrder.get(left.id) ?? Number.MAX_SAFE_INTEGER) -
-        (queuedOrder.get(right.id) ?? Number.MAX_SAFE_INTEGER),
-    );
-  }, [optimisticUserMessages, queuedMessageOrderOverride, timelineMessages]);
+  }, [
+    displayServerMessages,
+    optimisticUserMessages,
+    queuedMessageFailure,
+    queuedMessageOrderOverride,
+    timelineMessages,
+  ]);
   const optimisticQueuedMessageIds = useMemo(
     () =>
       new Set(
         optimisticUserMessages.flatMap((message) =>
-          message.role === "user" && message.deliveryState === "queued" ? [message.id] : [],
+          message.role === "user" &&
+          message.deliveryState === "queued" &&
+          shouldKeepOptimisticQueuedMessage(
+            message,
+            displayServerMessages.find((serverMessage) => serverMessage.id === message.id),
+          )
+            ? [message.id]
+            : [],
         ),
       ),
-    [optimisticUserMessages],
+    [displayServerMessages, optimisticUserMessages],
   );
   // Queued follow-ups belong to the composer queue, not the conversation.
   // They enter the timeline only after dispatch/steer clears deliveryState.
@@ -2772,7 +2803,8 @@ function ChatViewContent(props: ChatViewProps) {
         (message) =>
           !(
             message.role === "user" &&
-            (message.deliveryState === "queued" || optimisticQueuedMessageIds.has(message.id))
+            (shouldKeepAuthoritativeQueuedMessage(message) ||
+              optimisticQueuedMessageIds.has(message.id))
           ),
       ),
     [optimisticQueuedMessageIds, timelineMessages],
@@ -4402,8 +4434,8 @@ function ChatViewContent(props: ChatViewProps) {
       const serverMessage = serverMessagesById.get(message.id);
       // The server publishes message-sent before turn-queued, so the matching
       // server row can exist briefly without a delivery marker. Keep the
-      // optimistic queue row through that handoff; acceptance assigns a turn
-      // and is the first point where it belongs in the conversation.
+      // optimistic row until the server acknowledges the queue. From then on,
+      // the server owns the row, including acceptance without a provider turn id.
       return shouldRemoveOptimisticQueuedMessage(message, serverMessage);
     });
     if (removedMessages.length === 0) {
@@ -4439,7 +4471,6 @@ function ChatViewContent(props: ChatViewProps) {
       return [];
     });
     resetLocalDispatch();
-    setEditingQueuedMessageId(null);
     setQueuedMessageOrderOverride(null);
     setExpandedImage(null);
   }, [draftId, resetLocalDispatch, threadId]);
@@ -5446,13 +5477,13 @@ function ChatViewContent(props: ChatViewProps) {
     },
   ) => {
     e?.preventDefault();
-    // Normalize the default form-submit intent to the configured active-turn
-    // behavior so keyboard and pointer submissions use the same contract.
+    // All composer submissions join the queue while work or queued follow-ups remain.
     const effectiveSubmissionIntent =
-      phase === "running" && submissionIntent === "foreground"
-        ? settings.activeTurnMessageBehavior
+      (phase === "running" || queuedMessages.length > 0) &&
+      (submissionIntent === "foreground" || submissionIntent === "steer")
+        ? "queue"
         : submissionIntent;
-    const canQueueWhileRunning = phase === "running" && effectiveSubmissionIntent === "queue";
+    const canQueueWhileRunning = effectiveSubmissionIntent === "queue";
     const notifyDirectAnnotationAttached = () => {
       if (!directAnnotation) return;
       toastManager.add(
@@ -5544,95 +5575,14 @@ function ChatViewContent(props: ChatViewProps) {
         composerPreviewAnnotations.length +
         composerReviewComments.length,
     });
-    if (editingQueuedMessageId !== null) {
-      const hasUnsupportedEditContext =
-        composerImages.length > 0 ||
-        sendableComposerTerminalContexts.length > 0 ||
-        composerElementContexts.length > 0 ||
-        composerPreviewAnnotations.length > 0 ||
-        composerReviewComments.length > 0;
-      if (trimmed.length === 0 || hasUnsupportedEditContext) {
-        toastManager.add(
-          stackedThreadToast({
-            type: "warning",
-            title:
-              trimmed.length === 0
-                ? "Queued message cannot be empty"
-                : "Edit the message text only",
-            description:
-              trimmed.length === 0
-                ? "Enter replacement text, then send to save the queued message."
-                : "Attachments and context on the queued message are preserved automatically.",
-          }),
-        );
-        return;
-      }
-      const editedAt = new Date().toISOString();
-      const result = await editQueuedTurn({
-        environmentId,
-        input: {
-          threadId: activeThread.id,
-          messageId: editingQueuedMessageId,
-          text: promptForSend,
-        },
-      });
-      if (result._tag === "Failure") {
-        const error = squashAtomCommandFailure(result);
-        if (isStaleQueuedMessageCommandError(error)) {
-          setEditingQueuedMessageId(null);
-          promptRef.current = "";
-          clearComposerDraftContent(composerDraftTarget);
-          composerRef.current?.resetCursorState({ cursor: 0 });
-          return;
-        }
-        toastManager.add(
-          stackedThreadToast({
-            type: "error",
-            title: "Could not edit queued message",
-            description: chatActionErrorMessage(error),
-          }),
-        );
-        return;
-      }
-      setOptimisticUserMessages((existing) =>
-        existing.map((message) =>
-          message.id === editingQueuedMessageId
-            ? { ...message, text: promptForSend, updatedAt: editedAt }
-            : message,
-        ),
+    if (canQueueWhileRunning && queuedMessages.length >= MAX_QUEUED_MESSAGES) {
+      toastManager.add(
+        stackedThreadToast({
+          type: "warning",
+          title: "Queue is full",
+          description: `You can queue up to ${MAX_QUEUED_MESSAGES} messages. Delete or send one before adding another.`,
+        }),
       );
-      setEditingQueuedMessageId(null);
-      promptRef.current = "";
-      clearComposerDraftContent(composerDraftTarget);
-      composerRef.current?.resetCursorState({ cursor: 0 });
-      return;
-    }
-    const shouldInterruptForStop =
-      phase === "running" &&
-      activeRunningTurnId !== null &&
-      directAnnotation === undefined &&
-      composerImages.length === 0 &&
-      sendableComposerTerminalContexts.length === 0 &&
-      composerElementContexts.length === 0 &&
-      composerPreviewAnnotations.length === 0 &&
-      composerReviewComments.length === 0 &&
-      isStopGenerationPrompt(trimmed);
-    if (shouldInterruptForStop) {
-      const result = await interruptThreadTurn({
-        environmentId,
-        input: buildThreadTurnInterruptInput(activeThread),
-      });
-      if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
-        const error = squashAtomCommandFailure(result);
-        setThreadError(
-          activeThread.id,
-          error instanceof Error ? error.message : "Failed to interrupt the current turn.",
-        );
-        return;
-      }
-      promptRef.current = "";
-      clearComposerDraftContent(composerDraftTarget);
-      composerRef.current?.resetCursorState({ cursor: 0 });
       return;
     }
     const feedbackCommand =
@@ -6070,63 +6020,43 @@ function ChatViewContent(props: ChatViewProps) {
       if (backgroundThreadRef) {
         beginBackgroundDraftSubmissionByRef(backgroundThreadRef);
       }
-      const shouldSteerActiveTurn =
-        phase === "running" && activeRunningTurnId !== null && resolvedSubmissionIntent === "steer";
-      const shouldQueueAfterCurrent =
-        phase === "running" &&
-        !shouldSteerActiveTurn &&
-        (resolvedSubmissionIntent === "foreground" || resolvedSubmissionIntent === "queue");
-      const startResult = shouldSteerActiveTurn
-        ? await steerThreadTurn({
+      const shouldQueueAfterCurrent = resolvedSubmissionIntent === "queue";
+      const startResult = shouldQueueAfterCurrent
+        ? await queueThreadTurn({
             environmentId,
             input: {
               threadId: threadIdForSend,
-              expectedTurnId: activeRunningTurnId,
               message: {
                 messageId: messageIdForSend,
                 role: "user",
                 text: outgoingMessageText,
                 attachments: turnAttachmentsResult.value,
               },
+              modelSelection: ctxSelectedModelSelection,
+              titleSeed: title,
+              runtimeMode,
+              interactionMode,
               createdAt: messageCreatedAt,
             },
           })
-        : shouldQueueAfterCurrent
-          ? await queueThreadTurn({
-              environmentId,
-              input: {
-                threadId: threadIdForSend,
-                message: {
-                  messageId: messageIdForSend,
-                  role: "user",
-                  text: outgoingMessageText,
-                  attachments: turnAttachmentsResult.value,
-                },
-                modelSelection: ctxSelectedModelSelection,
-                titleSeed: title,
-                runtimeMode,
-                interactionMode,
-                createdAt: messageCreatedAt,
+        : await startThreadTurn({
+            environmentId,
+            input: {
+              threadId: threadIdForSend,
+              message: {
+                messageId: messageIdForSend,
+                role: "user",
+                text: outgoingMessageText,
+                attachments: turnAttachmentsResult.value,
               },
-            })
-          : await startThreadTurn({
-              environmentId,
-              input: {
-                threadId: threadIdForSend,
-                message: {
-                  messageId: messageIdForSend,
-                  role: "user",
-                  text: outgoingMessageText,
-                  attachments: turnAttachmentsResult.value,
-                },
-                modelSelection: ctxSelectedModelSelection,
-                titleSeed: title,
-                runtimeMode,
-                interactionMode,
-                ...(bootstrap ? { bootstrap } : {}),
-                createdAt: messageCreatedAt,
-              },
-            });
+              modelSelection: ctxSelectedModelSelection,
+              titleSeed: title,
+              runtimeMode,
+              interactionMode,
+              ...(bootstrap ? { bootstrap } : {}),
+              createdAt: messageCreatedAt,
+            },
+          });
       if (startResult._tag === "Failure") {
         if (backgroundThreadRef) {
           clearBackgroundDraftSubmissionByRef(backgroundThreadRef);
@@ -6919,47 +6849,16 @@ function ChatViewContent(props: ChatViewProps) {
         environmentId,
         input: { threadId: activeThread.id, messageId },
       });
-      if (result._tag === "Success") {
-        setOptimisticUserMessages((existing) =>
-          existing.filter((message) => message.id !== messageId),
-        );
-      }
+      if (result._tag === "Failure") throw squashAtomCommandFailure(result);
+      setOptimisticUserMessages((existing) =>
+        existing.filter((message) => message.id !== messageId),
+      );
     },
     [activeThread, cancelQueuedTurn, environmentId],
   );
   const onSteerQueuedMessage = useCallback(
     async (messageId: MessageId) => {
       if (!activeThread || activeRunningTurnId === null) return;
-      const queuedMessage = queuedMessages.find((message) => message.id === messageId);
-      if (queuedMessage && isStopGenerationPrompt(queuedMessage.text)) {
-        const interruptResult = await interruptThreadTurn({
-          environmentId,
-          input: buildThreadTurnInterruptInput(activeThread),
-        });
-        if (interruptResult._tag === "Failure") {
-          if (!isAtomCommandInterrupted(interruptResult)) {
-            const error = squashAtomCommandFailure(interruptResult);
-            toastManager.add(
-              stackedThreadToast({
-                type: "error",
-                title: "Could not stop the current turn",
-                description: chatActionErrorMessage(error),
-              }),
-            );
-          }
-          return;
-        }
-        const cancelResult = await cancelQueuedTurn({
-          environmentId,
-          input: { threadId: activeThread.id, messageId },
-        });
-        if (cancelResult._tag === "Success") {
-          setOptimisticUserMessages((existing) =>
-            existing.filter((message) => message.id !== messageId),
-          );
-        }
-        return;
-      }
       const result = await steerQueuedTurn({
         environmentId,
         input: {
@@ -6968,67 +6867,26 @@ function ChatViewContent(props: ChatViewProps) {
           expectedTurnId: activeRunningTurnId,
         },
       });
-      if (result._tag === "Success") {
-        setOptimisticUserMessages((existing) =>
-          existing.filter((message) => message.id !== messageId),
-        );
-      }
+      if (result._tag === "Failure") throw squashAtomCommandFailure(result);
+      setOptimisticUserMessages((existing) =>
+        existing.filter((message) => message.id !== messageId),
+      );
     },
-    [
-      activeRunningTurnId,
-      activeThread,
-      cancelQueuedTurn,
-      environmentId,
-      interruptThreadTurn,
-      queuedMessages,
-      steerQueuedTurn,
-    ],
+    [activeRunningTurnId, activeThread, environmentId, steerQueuedTurn],
   );
   const onEditQueuedMessage = useCallback(
     async (messageId: MessageId, text: string) => {
-      if (!activeThread) return;
+      if (!activeThread) throw new Error("Thread is unavailable.");
       const result = await editQueuedTurn({
         environmentId,
         input: { threadId: activeThread.id, messageId, text },
       });
-      if (result._tag === "Success") {
-        setOptimisticUserMessages((existing) =>
-          existing.map((message) =>
-            message.id === messageId
-              ? { ...message, text, updatedAt: new Date().toISOString() }
-              : message,
-          ),
-        );
-      } else {
-        const error = squashAtomCommandFailure(result);
-        if (isStaleQueuedMessageCommandError(error)) {
-          setOptimisticUserMessages((existing) =>
-            existing.filter((message) => message.id !== messageId),
-          );
-          return;
-        }
-        toastManager.add(
-          stackedThreadToast({
-            type: "error",
-            title: "Could not edit queued message",
-            description: chatActionErrorMessage(error),
-          }),
-        );
-      }
+      if (result._tag === "Failure") throw squashAtomCommandFailure(result);
+      setOptimisticUserMessages((messages) =>
+        messages.map((message) => (message.id === messageId ? { ...message, text } : message)),
+      );
     },
     [activeThread, editQueuedTurn, environmentId],
-  );
-  const onBeginEditQueuedMessage = useCallback(
-    (messageId: MessageId) => {
-      const message = queuedMessages.find((entry) => entry.id === messageId);
-      if (!message) return;
-      setEditingQueuedMessageId(messageId);
-      promptRef.current = message.text;
-      setComposerDraftPrompt(composerDraftTarget, message.text);
-      composerRef.current?.resetCursorState({ cursor: message.text.length });
-      window.requestAnimationFrame(() => composerRef.current?.focusAtEnd());
-    },
-    [composerDraftTarget, promptRef, queuedMessages, setComposerDraftPrompt],
   );
   const onReorderQueuedMessages = useCallback(
     async (items: ReadonlyArray<{ id: MessageId; text: string }>) => {
@@ -7052,23 +6910,30 @@ function ChatViewContent(props: ChatViewProps) {
     },
     [activeThread, environmentId, reorderQueuedTurns],
   );
+  const onRetryQueuedMessage = useCallback(
+    async (messageId: MessageId) => {
+      if (!activeThread) return;
+      const result = await resumeQueuedTurn({
+        environmentId,
+        input: { threadId: activeThread.id, messageId },
+      });
+      if (result._tag === "Failure") {
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Could not resume queue",
+            description: chatActionErrorMessage(squashAtomCommandFailure(result)),
+          }),
+        );
+      }
+    },
+    [activeThread, environmentId, resumeQueuedTurn],
+  );
   const onResumeInterruptedQueue = useCallback(async () => {
     const firstQueuedMessage = queuedMessages[0];
-    if (!activeThread || !firstQueuedMessage) return;
-    const result = await resumeQueuedTurn({
-      environmentId,
-      input: { threadId: activeThread.id, messageId: firstQueuedMessage.id },
-    });
-    if (result._tag === "Failure") {
-      toastManager.add(
-        stackedThreadToast({
-          type: "error",
-          title: "Could not resume queue",
-          description: chatActionErrorMessage(squashAtomCommandFailure(result)),
-        }),
-      );
-    }
-  }, [activeThread, environmentId, queuedMessages, resumeQueuedTurn]);
+    if (!firstQueuedMessage) return;
+    await onRetryQueuedMessage(firstQueuedMessage.id);
+  }, [onRetryQueuedMessage, queuedMessages]);
 
   // Empty state: no active thread
   if (!activeThread) {
@@ -7480,11 +7345,13 @@ function ChatViewContent(props: ChatViewProps) {
                             onCancelQueuedMessage={onCancelQueuedMessage}
                             onSteerQueuedMessage={onSteerQueuedMessage}
                             onEditQueuedMessage={onEditQueuedMessage}
-                            editingQueuedMessageId={editingQueuedMessageId}
-                            onBeginEditQueuedMessage={onBeginEditQueuedMessage}
                             onReorderQueuedMessages={onReorderQueuedMessages}
-                            isQueuedTurnInterrupted={activeThread.session?.status === "interrupted"}
+                            isQueuedTurnInterrupted={
+                              activeThread.session?.status === "interrupted" ||
+                              activeThread.session?.status === "stopped"
+                            }
                             onResumeInterruptedQueue={onResumeInterruptedQueue}
+                            onRetryQueuedMessage={onRetryQueuedMessage}
                             runtimeMode={runtimeMode}
                             interactionMode={interactionMode}
                             lockedProvider={lockedProvider}

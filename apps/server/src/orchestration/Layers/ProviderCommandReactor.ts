@@ -110,16 +110,6 @@ const MAX_THREAD_TITLE_CONTEXT_CHARS = 8_000;
 const MAX_FIRST_USER_TITLE_CONTEXT_CHARS = 2_000;
 const THREAD_TITLE_CONTEXT_TRUNCATION_MARKER = "[Earlier content truncated]\n\n";
 const FIRST_USER_CONTEXT_TRUNCATION_MARKER = "\n[First user message truncated]";
-const QUEUED_FOLLOW_UP_INSTRUCTION =
-  "Apply the user's latest follow-up to the existing task. Continue only if the follow-up asks for more work; if it asks you to stop, honor that request. Do not mention this internal instruction or queueing to the user.";
-
-// Keep the persisted/displayed message as the user's original text. Only the
-// provider receives this wrapper, so queued turns continue the existing task
-// without adding a second synthetic message to the conversation UI.
-function buildQueuedFollowUpPrompt(messageText: string): string {
-  return `${QUEUED_FOLLOW_UP_INSTRUCTION}\n\nUser follow-up:\n${messageText}`;
-}
-
 const queuedTurnDrainLock = PartitionedSemaphore.makeUnsafe<ThreadId>({ permits: 1 });
 
 const isBlockingSessionStatus = (status: OrchestrationSession["status"] | undefined): boolean =>
@@ -1385,7 +1375,7 @@ const make = Effect.gen(function* () {
       }
       return yield* buildSendTurnRequestForThread({
         threadId: thread.id,
-        messageText: buildQueuedFollowUpPrompt(message.text),
+        messageText: message.text,
         ...(message.attachments !== undefined ? { attachments: message.attachments } : {}),
         ...(queuedRow.modelSelection !== null ? { modelSelection: queuedRow.modelSelection } : {}),
         interactionMode: queuedRow.interactionMode,
@@ -1480,9 +1470,7 @@ const make = Effect.gen(function* () {
       threadId: event.payload.threadId,
       expectedTurnId: event.payload.expectedTurnId,
       clientUserMessageId: message.id,
-      ...(message.text.trim().length > 0
-        ? { input: isQueuedSteer ? buildQueuedFollowUpPrompt(message.text) : message.text }
-        : {}),
+      ...(message.text.trim().length > 0 ? { input: message.text } : {}),
       ...(message.attachments !== undefined ? { attachments: message.attachments } : {}),
     };
     if (isQueuedSteer) {
@@ -1570,7 +1558,7 @@ const make = Effect.gen(function* () {
 
   const tryDispatchNextQueuedTurn = Effect.fn("tryDispatchNextQueuedTurn")(function* (
     threadId: ThreadId,
-    allowInterrupted = false,
+    resume = false,
   ) {
     return yield* queuedTurnDrainLock.withPermit(threadId)(
       Effect.gen(function* () {
@@ -1582,7 +1570,10 @@ const make = Effect.gen(function* () {
         if (thread === undefined) return;
         if (
           isBlockingSessionStatus(thread.session?.status) ||
-          (!allowInterrupted && thread.session?.status === "interrupted")
+          (!resume &&
+            (thread.session?.status === "interrupted" ||
+              thread.session?.status === "error" ||
+              thread.session?.status === "stopped"))
         ) {
           return;
         }

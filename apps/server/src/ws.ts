@@ -300,7 +300,16 @@ export function isThreadDetailEvent(event: OrchestrationEvent): event is Extract
       | "thread.activity-appended"
       | "thread.turn-diff-completed"
       | "thread.reverted"
-      | "thread.session-set";
+      | "thread.session-set"
+      | "thread.turn-queued"
+      | "thread.queued-turn-dispatched"
+      | "thread.queued-turn-accepted"
+      | "thread.queued-turn-failed"
+      | "thread.queued-turn-cancelled"
+      | "thread.queued-turn-edited"
+      | "thread.queued-turn-reordered"
+      | "thread.queued-turn-resumed"
+      | "thread.queued-turn-steer-requested";
   }
 > {
   return (
@@ -309,7 +318,16 @@ export function isThreadDetailEvent(event: OrchestrationEvent): event is Extract
     event.type === "thread.activity-appended" ||
     event.type === "thread.turn-diff-completed" ||
     event.type === "thread.reverted" ||
-    event.type === "thread.session-set"
+    event.type === "thread.session-set" ||
+    event.type === "thread.turn-queued" ||
+    event.type === "thread.queued-turn-dispatched" ||
+    event.type === "thread.queued-turn-accepted" ||
+    event.type === "thread.queued-turn-failed" ||
+    event.type === "thread.queued-turn-cancelled" ||
+    event.type === "thread.queued-turn-edited" ||
+    event.type === "thread.queued-turn-reordered" ||
+    event.type === "thread.queued-turn-resumed" ||
+    event.type === "thread.queued-turn-steer-requested"
   );
 }
 

@@ -464,7 +464,7 @@ describe("ComposerPrimaryActions", () => {
     expect(markup).toContain('aria-label="Queue message"');
   });
 
-  it("labels the active-turn action as steer while steering is configured", () => {
+  it("keeps Send as queue with a legacy steering preference", () => {
     const markup = renderToStaticMarkup(
       createElement(ComposerPrimaryActions, {
         compact: true,
@@ -487,8 +487,8 @@ describe("ComposerPrimaryActions", () => {
       }),
     );
 
-    expect(markup).toContain('aria-label="Steer message"');
-    expect(markup).toContain("Steer message");
+    expect(markup).toContain('aria-label="Queue message"');
+    expect(markup).not.toContain("Steer message");
   });
 
   it("clicks onQueue for the active queue action", async () => {
@@ -497,10 +497,10 @@ describe("ComposerPrimaryActions", () => {
     expect(onSteer).not.toHaveBeenCalled();
   });
 
-  it("clicks onSteer for the active steer action", async () => {
+  it("queues even with a legacy steering preference", async () => {
     const { onQueue, onSteer } = await clickActiveTurnAction("steer");
-    expect(onSteer).toHaveBeenCalledTimes(1);
-    expect(onQueue).not.toHaveBeenCalled();
+    expect(onQueue).toHaveBeenCalledTimes(1);
+    expect(onSteer).not.toHaveBeenCalled();
   });
 
   it("keeps queue available while the previous send is being projected", () => {

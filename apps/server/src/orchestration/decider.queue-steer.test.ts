@@ -1,5 +1,6 @@
 import {
   CommandId,
+  MAX_QUEUED_MESSAGES,
   MessageId,
   ProjectId,
   ProviderInstanceId,
@@ -300,6 +301,41 @@ it.layer(NodeServices.layer)("queued and steered turns", (it) => {
         messageId: MESSAGE_ID,
         expectedTurnId: TURN_ID,
       });
+    }),
+  );
+
+  it.effect("rejects an eleventh queued message", () =>
+    Effect.gen(function* () {
+      const readModel = makeReadModel({ queued: true, running: true });
+      const thread = readModel.threads[0]!;
+      const queuedMessages = Array.from({ length: MAX_QUEUED_MESSAGES }, (_, index) => ({
+        ...thread.messages[0]!,
+        id: MessageId.make(`queued-limit-${index}`),
+      }));
+      const fullReadModel = {
+        ...readModel,
+        threads: [{ ...thread, messages: queuedMessages }],
+      };
+      const result = yield* Effect.result(
+        decideOrchestrationCommand({
+          command: {
+            type: "thread.queued-turn.enqueue",
+            commandId: CommandId.make("cmd-queue-over-limit"),
+            threadId: THREAD_ID,
+            message: {
+              messageId: MessageId.make("queued-over-limit"),
+              role: "user",
+              text: "This should be rejected",
+              attachments: [],
+            },
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            createdAt: NOW,
+          },
+          readModel: fullReadModel,
+        }),
+      );
+      expect(result._tag).toBe("Failure");
     }),
   );
 

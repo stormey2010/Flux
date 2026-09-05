@@ -2290,44 +2290,8 @@ export function GeneralSettingsPanel() {
 
         <SettingsRow
           {...searchableSetting("messages-while-working")}
-          description="Choose whether a message sent during an active turn steers it immediately or waits to run next."
-          resetAction={
-            settings.activeTurnMessageBehavior !==
-            DEFAULT_UNIFIED_SETTINGS.activeTurnMessageBehavior ? (
-              <SettingResetButton
-                label="messages while working"
-                onClick={() =>
-                  updateSettings({
-                    activeTurnMessageBehavior: DEFAULT_UNIFIED_SETTINGS.activeTurnMessageBehavior,
-                  })
-                }
-              />
-            ) : null
-          }
-          control={
-            <Select
-              value={settings.activeTurnMessageBehavior}
-              onValueChange={(value) => {
-                if (value === "steer" || value === "queue") {
-                  updateSettings({ activeTurnMessageBehavior: value });
-                }
-              }}
-            >
-              <SelectTrigger className="w-full sm:w-40" aria-label="Messages while working">
-                <SelectValue>
-                  {settings.activeTurnMessageBehavior === "queue" ? "Queue" : "Steer"}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectPopup align="end" alignItemWithTrigger={false}>
-                <SelectItem hideIndicator value="steer">
-                  Steer
-                </SelectItem>
-                <SelectItem hideIndicator value="queue">
-                  Queue
-                </SelectItem>
-              </SelectPopup>
-            </Select>
-          }
+          description="Messages sent while working wait in the queue. Choose Steer on a queued message to send it to the active turn."
+          control={<span className="text-sm text-muted-foreground">Queue first</span>}
         />
 
         <SettingsRow

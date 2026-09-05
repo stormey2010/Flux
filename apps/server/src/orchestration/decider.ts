@@ -1,5 +1,6 @@
 import {
   EventId,
+  MAX_QUEUED_MESSAGES,
   type OrchestrationCommand,
   type OrchestrationEvent,
   type OrchestrationReadModel,
@@ -940,6 +941,19 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command,
         threadId: command.threadId,
       });
+      const queuesThisTurn =
+        command.type === "thread.queued-turn.enqueue" ||
+        ("deliveryMode" in command && command.deliveryMode === "after-current");
+      if (
+        queuesThisTurn &&
+        targetThread.messages.filter((message) => message.deliveryState === "queued").length >=
+          MAX_QUEUED_MESSAGES
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `A thread can have at most ${MAX_QUEUED_MESSAGES} queued messages.`,
+        });
+      }
       const sourceProposedPlan = command.sourceProposedPlan;
       const sourceThread = sourceProposedPlan
         ? yield* requireThread({

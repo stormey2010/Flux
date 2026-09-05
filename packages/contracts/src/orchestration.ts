@@ -139,6 +139,7 @@ export const AssistantDeliveryMode = Schema.Literals(["buffered", "streaming"]);
 export type AssistantDeliveryMode = typeof AssistantDeliveryMode.Type;
 export const ThreadTurnDeliveryMode = Schema.Literals(["immediate", "after-current", "steer"]);
 export type ThreadTurnDeliveryMode = typeof ThreadTurnDeliveryMode.Type;
+export const MAX_QUEUED_MESSAGES = 10;
 export const ProviderApprovalDecision = Schema.Literals([
   "accept",
   "acceptForSession",

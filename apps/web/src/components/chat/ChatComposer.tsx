@@ -628,11 +628,10 @@ export interface ChatComposerProps {
   onCancelQueuedMessage: (messageId: MessageId) => void;
   onSteerQueuedMessage: (messageId: MessageId) => void;
   onEditQueuedMessage: (messageId: MessageId, text: string) => void | Promise<void>;
-  editingQueuedMessageId?: MessageId | null;
-  onBeginEditQueuedMessage?: (messageId: MessageId) => void;
   onReorderQueuedMessages?: (items: ReadonlyArray<ComposerQueueItem>) => void;
   isQueuedTurnInterrupted?: boolean;
   onResumeInterruptedQueue?: () => void;
+  onRetryQueuedMessage?: (messageId: MessageId) => void;
 
   // Mode
   runtimeMode: RuntimeMode;
@@ -738,11 +737,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     onCancelQueuedMessage,
     onSteerQueuedMessage,
     onEditQueuedMessage,
-    editingQueuedMessageId,
-    onBeginEditQueuedMessage,
     onReorderQueuedMessages,
     isQueuedTurnInterrupted,
     onResumeInterruptedQueue,
+    onRetryQueuedMessage,
     runtimeMode,
     interactionMode,
     lockedProvider,
@@ -3097,17 +3095,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         onSteer={onSteerQueuedMessage}
         onCancel={onCancelQueuedMessage}
         onEdit={onEditQueuedMessage}
-        {...(editingQueuedMessageId !== undefined
-          ? { editingMessageId: editingQueuedMessageId }
-          : {})}
-        {...(onBeginEditQueuedMessage !== undefined
-          ? { onEditMessage: onBeginEditQueuedMessage }
-          : {})}
         {...(onReorderQueuedMessages !== undefined ? { onReorder: onReorderQueuedMessages } : {})}
         {...(isQueuedTurnInterrupted !== undefined
           ? { isInterrupted: isQueuedTurnInterrupted }
           : {})}
         {...(onResumeInterruptedQueue !== undefined ? { onResumeInterruptedQueue } : {})}
+        {...(onRetryQueuedMessage !== undefined ? { onRetry: onRetryQueuedMessage } : {})}
       />
       {showComposerTopDrawer && (!isTasksDrawerOpen || hasBlockingComposerTopDrawer) ? (
         <div

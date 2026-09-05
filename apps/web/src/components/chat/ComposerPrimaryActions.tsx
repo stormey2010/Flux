@@ -1,9 +1,6 @@
 import { memo, type PointerEventHandler } from "react";
 import { ChevronDownIcon, ChevronLeftIcon } from "lucide-react";
-import {
-  DEFAULT_ACTIVE_TURN_MESSAGE_BEHAVIOR,
-  type ActiveTurnMessageBehavior,
-} from "@t3tools/contracts/settings";
+import { type ActiveTurnMessageBehavior } from "@t3tools/contracts/settings";
 import { useEnvironmentIdentificationMode } from "~/hooks/useSettings";
 import { cn } from "~/lib/utils";
 import { StageBackdropButtonArt, useSidebarStageBackdropVariant } from "../SidebarStageBackdrop";
@@ -74,12 +71,12 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   isEnvironmentUnavailable,
   isPreparingWorktree,
   hasSendableContent,
-  activeTurnMessageBehavior = DEFAULT_ACTIVE_TURN_MESSAGE_BEHAVIOR,
+  activeTurnMessageBehavior: _activeTurnMessageBehavior,
   preserveComposerFocusOnPointerDown = false,
   onPreviousPendingQuestion,
   onInterrupt,
   onQueue,
-  onSteer,
+  onSteer: _onSteer,
   onImplementPlanInNewThread,
 }: ComposerPrimaryActionsProps) {
   const pointerFocusProps = preserveComposerFocusOnPointerDown
@@ -89,9 +86,8 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   const isSendDisabled = sendDisabledReason !== null;
   const canQueueWhileRunning = isRunning;
   const isSendBusyForCurrentAction = isSendBusy && !canQueueWhileRunning;
-  const activeTurnAction = activeTurnMessageBehavior === "steer" ? onSteer : onQueue;
-  const activeTurnActionLabel =
-    activeTurnMessageBehavior === "steer" ? "Steer message" : "Queue message";
+  const activeTurnAction = onQueue;
+  const activeTurnActionLabel = "Queue message";
   const stageBackdropVariant = useSidebarStageBackdropVariant(
     environmentIdentificationMode === "artwork",
   );

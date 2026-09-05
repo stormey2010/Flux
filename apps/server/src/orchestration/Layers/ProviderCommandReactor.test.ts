@@ -694,7 +694,7 @@ describe("ProviderCommandReactor", () => {
     );
     await waitFor(() => harness.steerTurn.mock.calls.length === 1);
     expect(harness.steerTurn.mock.calls[0]?.[0]).toMatchObject({
-      input: expect.stringContaining("User follow-up:\nsteer this next"),
+      input: "steer this next",
     });
     await waitFor(async () => {
       const message = (await harness.readModel()).threads[0]?.messages.find(
@@ -842,7 +842,7 @@ describe("ProviderCommandReactor", () => {
     await waitFor(() => harness.sendTurn.mock.calls.length === 1);
     expect(harness.sendTurn.mock.calls[0]?.[0]).toMatchObject({
       threadId: ThreadId.make("thread-1"),
-      input: expect.stringContaining("User follow-up:\nsend me next"),
+      input: "send me next",
       forceNewTurn: true,
     });
   });
@@ -899,7 +899,7 @@ describe("ProviderCommandReactor", () => {
     );
     await waitFor(() => harness.sendTurn.mock.calls.length === 1);
     expect(harness.sendTurn.mock.calls[0]?.[0]).toMatchObject({
-      input: expect.stringContaining("User follow-up:\nwait for acceptance"),
+      input: "wait for acceptance",
     });
 
     const pending = (await harness.readModel()).threads[0]?.messages.find(
@@ -993,63 +993,66 @@ describe("ProviderCommandReactor", () => {
     });
   });
 
-  it("does not drain an interrupted queue until resumed", async () => {
-    const harness = await createHarness();
-    const now = "2026-01-01T00:00:00.000Z";
-    await harness.runEffect(
-      harness.engine.dispatch({
-        type: "thread.session.set",
-        commandId: CommandId.make("cmd-session-interrupted-for-queue"),
-        threadId: ThreadId.make("thread-1"),
-        session: {
+  it.each(["interrupted", "error", "stopped"] as const)(
+    "does not drain a %s queue until resumed",
+    async (status) => {
+      const harness = await createHarness();
+      const now = "2026-01-01T00:00:00.000Z";
+      await harness.runEffect(
+        harness.engine.dispatch({
+          type: "thread.session.set",
+          commandId: CommandId.make("cmd-session-interrupted-for-queue"),
           threadId: ThreadId.make("thread-1"),
-          status: "interrupted",
-          providerName: "codex",
-          providerInstanceId: ProviderInstanceId.make("codex"),
-          runtimeMode: "full-access",
-          activeTurnId: null,
-          lastError: "interrupted",
-          updatedAt: now,
-        },
-        createdAt: now,
-      }),
-    );
-    await harness.runEffect(
-      harness.engine.dispatch({
-        type: "thread.queued-turn.enqueue",
-        commandId: CommandId.make("cmd-queued-while-interrupted"),
-        threadId: ThreadId.make("thread-1"),
-        message: {
-          messageId: asMessageId("queued-message-interrupted"),
-          role: "user",
-          text: "wait for resume",
-          attachments: [],
-        },
-        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-        runtimeMode: "full-access",
-        createdAt: now,
-      }),
-    );
-    await Effect.runPromise(Effect.yieldNow);
-    expect(harness.sendTurn).not.toHaveBeenCalled();
-
-    await harness.runEffect(
-      harness.engine.dispatch({
-        type: "thread.queued-turn.resume",
-        commandId: CommandId.make("cmd-resume-interrupted-queue"),
-        threadId: ThreadId.make("thread-1"),
-        messageId: asMessageId("queued-message-interrupted"),
-        createdAt: now,
-      }),
-    );
-    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
-    await waitFor(async () => {
-      const message = (await harness.readModel()).threads[0]?.messages.find(
-        (entry) => entry.id === asMessageId("queued-message-interrupted"),
+          session: {
+            threadId: ThreadId.make("thread-1"),
+            status,
+            providerName: "codex",
+            providerInstanceId: ProviderInstanceId.make("codex"),
+            runtimeMode: "full-access",
+            activeTurnId: null,
+            lastError: "interrupted",
+            updatedAt: now,
+          },
+          createdAt: now,
+        }),
       );
-      return message?.deliveryState === undefined;
-    });
-  });
+      await harness.runEffect(
+        harness.engine.dispatch({
+          type: "thread.queued-turn.enqueue",
+          commandId: CommandId.make("cmd-queued-while-interrupted"),
+          threadId: ThreadId.make("thread-1"),
+          message: {
+            messageId: asMessageId("queued-message-interrupted"),
+            role: "user",
+            text: "wait for resume",
+            attachments: [],
+          },
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "full-access",
+          createdAt: now,
+        }),
+      );
+      await Effect.runPromise(Effect.yieldNow);
+      expect(harness.sendTurn).not.toHaveBeenCalled();
+
+      await harness.runEffect(
+        harness.engine.dispatch({
+          type: "thread.queued-turn.resume",
+          commandId: CommandId.make("cmd-resume-interrupted-queue"),
+          threadId: ThreadId.make("thread-1"),
+          messageId: asMessageId("queued-message-interrupted"),
+          createdAt: now,
+        }),
+      );
+      await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+      await waitFor(async () => {
+        const message = (await harness.readModel()).threads[0]?.messages.find(
+          (entry) => entry.id === asMessageId("queued-message-interrupted"),
+        );
+        return message?.deliveryState === undefined;
+      });
+    },
+  );
 
   it("cancels a queued message before it reaches the provider", async () => {
     const harness = await createHarness();

@@ -10,6 +10,20 @@ becomes available after every upload finishes. Failed uploads can be retried or 
 On web and desktop, HEIC and HEIF photos are automatically converted to JPEG when you drag them into
 the composer or paste them into a message.
 
+## Queued messages
+
+Send a message while the agent is working to add it to the queue above the composer.
+Queued messages run in order after the current turn finishes. They appear in the
+conversation when sent.
+
+Choose **Steer** on a queued message to submit it to the active turn. Use the message
+menu to edit its text, then **Save** or **Cancel**. Editing preserves attachments and
+your composer draft. Delete a queued message with the trash button, or drag its handle
+to change the order. The handle also supports keyboard reordering.
+
+Stopping the agent pauses the queue. Choose **Resume** to continue. If sending fails,
+the queue waits for **Retry**; it does not skip to later messages.
+
 ## Commands and skills
 
 Type `/` to open the command menu. Type `$` to find and add a skill. Skill rows show their source,

@@ -23,8 +23,7 @@ describe("ComposerQueueStack", () => {
     );
 
     expect(markup).toContain('data-chat-composer-queue="true"');
-    expect(markup).toContain('data-testid="composer-queue-toggle"');
-    expect(markup).toContain("2 messages waiting");
+    expect(markup).toContain("2 waiting");
     expect(markup).toContain("Runs next");
     expect(markup).toContain("max-h-[30dvh]");
     expect(markup).toContain('aria-label="Steer"');
@@ -56,8 +55,6 @@ describe("ComposerQueueStack", () => {
         onRetry={() => {}}
         onCancel={() => {}}
         onEdit={() => {}}
-        editingMessageId={firstItem.id}
-        onEditMessage={() => {}}
       />,
     );
 
@@ -65,8 +62,7 @@ describe("ComposerQueueStack", () => {
     expect(markup).toContain(">Resume<");
     expect(markup).toContain('aria-label="Retry"');
     expect(markup).toContain('alt="Image attachment"');
-    expect(markup).toContain("opacity-60");
-    expect(markup).not.toContain("Edit queued message");
+    expect(markup).toContain('aria-label="Queued message actions"');
   });
 
   it("does not render when the durable queue is empty", () => {

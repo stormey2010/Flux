@@ -1,34 +1,32 @@
 import type { MessageId } from "@t3tools/contracts";
-import { autoAnimate } from "@formkit/auto-animate";
 import {
-  closestCenter,
   DndContext,
   PointerSensor,
+  KeyboardSensor,
+  closestCenter,
   useSensor,
   useSensors,
   type DragEndEvent,
 } from "@dnd-kit/core";
-import { restrictToFirstScrollableAncestor, restrictToVerticalAxis } from "@dnd-kit/modifiers";
-import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import {
+  SortableContext,
+  useSortable,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+  arrayMove,
+} from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import {
-  ChevronDownIcon,
   CornerDownRightIcon,
   GripVerticalIcon,
   MoreHorizontalIcon,
-  PanelRightIcon,
   PencilIcon,
   PlayIcon,
-  RotateCcwIcon,
   Trash2Icon,
-  TriangleAlertIcon,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
-
-import { cn } from "~/lib/utils";
+import { useState } from "react";
 import { Button } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 export interface ComposerQueueItem {
   readonly id: MessageId;
@@ -40,260 +38,181 @@ export interface ComposerQueueItem {
 interface ComposerQueueStackProps {
   readonly items: ReadonlyArray<ComposerQueueItem>;
   readonly canSteer: boolean;
-  readonly onSteer: (messageId: MessageId) => void;
-  readonly onCancel: (messageId: MessageId) => void;
-  /** Legacy callback retained for existing callers; editing remains parent-owned. */
+  readonly onSteer: (messageId: MessageId) => void | Promise<void>;
+  readonly onCancel: (messageId: MessageId) => void | Promise<void>;
   readonly onEdit: (messageId: MessageId, text: string) => void | Promise<void>;
   readonly isInterrupted?: boolean;
-  readonly onResumeInterruptedQueue?: () => void;
-  readonly editingMessageId?: MessageId | null;
-  readonly onEditMessage?: (messageId: MessageId) => void;
-  readonly isMessagePaused?: (pausedReason: string | null | undefined) => boolean;
-  readonly onRetry?: (messageId: MessageId) => void;
-  readonly isSendNowDisabled?: boolean;
-  readonly onOpenInSideChat?: (messageId: MessageId) => void;
-  readonly isQueueingEnabled?: boolean;
-  readonly onQueueingChange?: (enabled: boolean) => void;
+  readonly onResumeInterruptedQueue?: () => void | Promise<void>;
+  readonly onRetry?: (messageId: MessageId) => void | Promise<void>;
   readonly onReorder?: (items: ReadonlyArray<ComposerQueueItem>) => void;
-}
-
-function moveItem<T>(items: ReadonlyArray<T>, from: number, to: number): T[] {
-  const next = [...items];
-  const [item] = next.splice(from, 1);
-  if (item === undefined) return next;
-  next.splice(to, 0, item);
-  return next;
 }
 
 function QueueRow({
   item,
   canReorder,
-  isSendNowDisabled,
-  isEditing,
-  isPaused,
+  canSteer,
   onSteer,
-  onRetry,
   onCancel,
   onEdit,
-  onEditMessage,
-  onOpenInSideChat,
-  isQueueingEnabled,
-  onQueueingChange,
+  onRetry,
 }: {
-  readonly item: ComposerQueueItem;
-  readonly canReorder: boolean;
-  readonly isSendNowDisabled: boolean;
-  readonly isEditing: boolean;
-  readonly isPaused: boolean;
-  readonly onSteer: (messageId: MessageId) => void;
-  readonly onRetry: ((messageId: MessageId) => void) | undefined;
-  readonly onCancel: (messageId: MessageId) => void;
-  readonly onEdit: (messageId: MessageId, text: string) => void | Promise<void>;
-  readonly onEditMessage: ((messageId: MessageId) => void) | undefined;
-  readonly onOpenInSideChat: ((messageId: MessageId) => void) | undefined;
-  readonly isQueueingEnabled: boolean | undefined;
-  readonly onQueueingChange: ((enabled: boolean) => void) | undefined;
-}) {
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    setActivatorNodeRef,
-    transform,
-    transition,
-    isDragging,
-  } = useSortable({ id: item.id, disabled: !canReorder });
-
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
+  item: ComposerQueueItem;
+  canReorder: boolean;
+} & Pick<ComposerQueueStackProps, "canSteer" | "onSteer" | "onCancel" | "onEdit" | "onRetry">) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const sortable = useSortable({ id: item.id, disabled: !canReorder || busy || draft !== null });
+  const run = async (action: () => void | Promise<void>) => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await action();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not update this queued message.");
+    } finally {
+      setBusy(false);
+    }
   };
-
-  const primaryLabel = isPaused ? "Retry" : "Steer";
-  const primaryTooltipContent = isPaused ? (
-    <div className="space-y-1 text-center">
-      <p>Try sending this queued message again</p>
-      <p className="opacity-65">Edit or delete it if retry keeps failing</p>
-    </div>
-  ) : (
-    "Submit without interrupting the model"
-  );
-
   return (
     <div
-      ref={setNodeRef}
-      style={style}
+      ref={sortable.setNodeRef}
+      style={{
+        transform: CSS.Transform.toString(sortable.transform),
+        transition: sortable.transition,
+      }}
       data-chat-composer-queue-item="true"
       data-message-id={item.id}
-      className={cn(
-        "group overflow-visible rounded-lg transition-colors hover:bg-muted/35",
-        (isEditing || isDragging) && "opacity-60",
-        isDragging && "bg-muted/45 shadow-sm",
-      )}
+      className="rounded-lg px-3 py-1.5 text-sm hover:bg-muted/30"
     >
-      <div className="flex min-h-8 min-w-0 items-center gap-1.5 px-3 py-1.5">
+      <div className="flex min-h-6 items-center gap-2">
         {canReorder ? (
-          <span
-            ref={setActivatorNodeRef}
-            className="relative -ms-2.5 flex h-6 w-4 cursor-grab items-center justify-center rounded-sm ps-1 active:cursor-grabbing"
-            {...attributes}
-            {...listeners}
+          <button
+            type="button"
+            ref={sortable.setActivatorNodeRef}
+            {...sortable.attributes}
+            {...sortable.listeners}
+            aria-label="Reorder queued message"
+            className="cursor-grab touch-none text-muted-foreground"
           >
-            <GripVerticalIcon
-              className={cn(
-                "pointer-events-none size-3 text-muted-foreground transition-opacity",
-                isDragging ? "opacity-100" : "opacity-45 group-hover:opacity-100",
-              )}
-              aria-hidden="true"
-            />
-            <span className="sr-only">Drag to reorder</span>
-          </span>
+            <GripVerticalIcon className="size-3" />
+          </button>
         ) : (
-          <CornerDownRightIcon
-            className="size-3 shrink-0 text-muted-foreground/70"
-            aria-hidden="true"
-          />
+          <CornerDownRightIcon className="size-3 shrink-0 text-muted-foreground" />
         )}
-
-        {isPaused ? (
-          <Tooltip>
-            <TooltipTrigger render={<span className="mt-0.5 inline-flex shrink-0 text-warning" />}>
-              <TriangleAlertIcon className="size-3" aria-hidden="true" />
-            </TooltipTrigger>
-            <TooltipPopup
-              side="top"
-              className="max-w-80 whitespace-normal text-center leading-snug"
-            >
-              <div className="space-y-1 text-center">
-                <p>This queued message could not be sent</p>
-                <p className="opacity-65">Retry, edit, or delete it to continue the queue</p>
-              </div>
-            </TooltipPopup>
-          </Tooltip>
-        ) : null}
-
         {item.imagePreviewSrc ? (
           <img
-            className="size-6 shrink-0 rounded border border-border object-cover"
             src={item.imagePreviewSrc}
             alt="Image attachment"
-            draggable={false}
+            className="size-6 rounded object-cover"
           />
         ) : null}
-
-        <div className="min-w-0 flex-1 self-center truncate leading-5 text-secondary-label">
-          {item.text}
-        </div>
-
-        <div className="flex shrink-0 items-center gap-0.5">
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="xs"
-                  disabled={isSendNowDisabled}
-                  aria-label={primaryLabel}
-                  data-markdown-copy="exclude"
-                  className="h-6 gap-1 px-1.5 text-xs text-secondary-label hover:text-foreground"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    if (isPaused) {
-                      (onRetry ?? onSteer)(item.id);
-                    } else {
-                      onSteer(item.id);
-                    }
-                  }}
-                />
+        <span className="min-w-0 flex-1 truncate" title={item.text}>
+          {item.text || "Attachment"}
+        </span>
+        <Button
+          type="button"
+          variant="ghost"
+          size="xs"
+          disabled={busy || draft !== null || (item.pausedReason ? !onRetry : !canSteer)}
+          aria-label={item.pausedReason ? "Retry" : "Steer"}
+          title={
+            item.pausedReason
+              ? "Try sending this queued message again"
+              : "Submit to the active turn"
+          }
+          onClick={() =>
+            void run(() => (item.pausedReason && onRetry ? onRetry(item.id) : onSteer(item.id)))
+          }
+        >
+          <CornerDownRightIcon className="size-3" />
+          {item.pausedReason ? "Retry" : "Steer"}
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-micro"
+          aria-label="Delete queued message"
+          disabled={busy}
+          onClick={() => void run(() => onCancel(item.id))}
+        >
+          <Trash2Icon className="size-3" />
+        </Button>
+        <Menu>
+          <MenuTrigger
+            render={
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-micro"
+                aria-label="Queued message actions"
+                disabled={busy}
+              />
+            }
+          >
+            <MoreHorizontalIcon className="size-3" />
+          </MenuTrigger>
+          <MenuPopup align="end">
+            <MenuItem
+              onClick={() => {
+                setDraft(item.text);
+                setError(null);
+              }}
+            >
+              <PencilIcon />
+              Edit message
+            </MenuItem>
+          </MenuPopup>
+        </Menu>
+      </div>
+      {draft !== null ? (
+        <div className="mt-2 space-y-2">
+          <textarea
+            aria-label="Edit queued message"
+            autoFocus
+            value={draft}
+            disabled={busy}
+            onChange={(event) => setDraft(event.target.value)}
+            className="min-h-20 w-full resize-y rounded-lg border border-border bg-background p-2 outline-none focus:border-ring"
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.preventDefault();
+                setDraft(null);
+              }
+            }}
+          />
+          <div className="flex justify-end gap-2">
+            <Button
+              type="button"
+              variant="ghost"
+              size="xs"
+              disabled={busy}
+              onClick={() => setDraft(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              size="xs"
+              disabled={busy || !draft.trim()}
+              onClick={() =>
+                void run(async () => {
+                  await onEdit(item.id, draft);
+                  setDraft(null);
+                })
               }
             >
-              {isPaused ? (
-                <RotateCcwIcon className="size-3" aria-hidden="true" />
-              ) : (
-                <CornerDownRightIcon className="size-3" aria-hidden="true" />
-              )}
-              {primaryLabel}
-            </TooltipTrigger>
-            <TooltipPopup
-              side="top"
-              className="max-w-80 whitespace-normal text-center leading-snug"
-            >
-              {primaryTooltipContent}
-            </TooltipPopup>
-          </Tooltip>
-
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-micro"
-            aria-label="Delete queued message"
-            onClick={(event) => {
-              event.stopPropagation();
-              onCancel(item.id);
-            }}
-          >
-            <Trash2Icon className="size-3" aria-hidden="true" />
-          </Button>
-
-          <Menu>
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <MenuTrigger
-                    render={
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-micro"
-                        aria-label="Queued message actions"
-                        onClick={(event) => event.stopPropagation()}
-                      />
-                    }
-                  />
-                }
-              >
-                <MoreHorizontalIcon className="size-3" aria-hidden="true" />
-              </TooltipTrigger>
-              <TooltipPopup side="top">Queued message actions</TooltipPopup>
-            </Tooltip>
-            <MenuPopup align="end">
-              <MenuItem
-                onClick={(event) => {
-                  event.stopPropagation();
-                  if (onEditMessage) onEditMessage(item.id);
-                  else void onEdit(item.id, item.text);
-                }}
-              >
-                <PencilIcon />
-                Edit message
-              </MenuItem>
-              {onOpenInSideChat ? (
-                <MenuItem
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onOpenInSideChat(item.id);
-                  }}
-                >
-                  <PanelRightIcon />
-                  Open in side chat
-                </MenuItem>
-              ) : null}
-              {onQueueingChange && typeof isQueueingEnabled === "boolean" ? (
-                <MenuItem
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onQueueingChange(!isQueueingEnabled);
-                  }}
-                >
-                  <CornerDownRightIcon />
-                  {isQueueingEnabled ? "Turn off queueing" : "Turn on queueing"}
-                </MenuItem>
-              ) : null}
-            </MenuPopup>
-          </Menu>
+              {busy ? "Saving…" : "Save"}
+            </Button>
+          </div>
         </div>
-      </div>
+      ) : null}
+      {error || item.pausedReason ? (
+        <p role="alert" className="mt-1 text-xs text-destructive">
+          {error || item.pausedReason}
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -306,127 +225,70 @@ export function ComposerQueueStack({
   onEdit,
   isInterrupted = false,
   onResumeInterruptedQueue,
-  editingMessageId = null,
-  onEditMessage,
-  isMessagePaused,
   onRetry,
-  isSendNowDisabled = !canSteer,
-  onOpenInSideChat,
-  isQueueingEnabled,
-  onQueueingChange,
   onReorder,
 }: ComposerQueueStackProps) {
-  const listRef = useRef<HTMLDivElement>(null);
-  const [isCollapsed, setIsCollapsed] = useState(false);
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
-  const itemIds = useMemo(() => items.map((item) => item.id), [items]);
-
-  useEffect(() => {
-    if (listRef.current) {
-      autoAnimate(listRef.current, { duration: 180, easing: "ease-out" });
-    }
-  }, [isCollapsed]);
-
-  if (items.length === 0) return null;
-
-  const handleDragEnd = ({ active, over }: DragEndEvent) => {
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+  if (!items.length) return null;
+  const reorder = ({ active, over }: DragEndEvent) => {
     if (!over || active.id === over.id || !onReorder) return;
-    const from = itemIds.indexOf(active.id as MessageId);
-    const to = itemIds.indexOf(over.id as MessageId);
-    if (from < 0 || to < 0) return;
-    onReorder(moveItem(items, from, to));
+    const from = items.findIndex((item) => item.id === active.id);
+    const to = items.findIndex((item) => item.id === over.id);
+    if (from >= 0 && to >= 0) onReorder(arrayMove([...items], from, to));
   };
-
   return (
-    <div
+    <section
+      aria-label="Queued messages"
       data-chat-composer-queue="true"
-      data-chat-composer-queue-collapsed={isCollapsed ? "true" : "false"}
-      className="mb-2 overflow-hidden rounded-xl border border-border/70 bg-background/90 shadow-sm backdrop-blur-md"
+      className="mx-2 overflow-hidden rounded-t-xl border border-b-0 border-border/60 bg-muted/25"
     >
-      <div className="flex min-h-9 items-center gap-2 border-b border-border/55 px-3 py-1">
-        <button
-          type="button"
-          aria-expanded={!isCollapsed}
-          aria-label={isCollapsed ? "Expand queue" : "Collapse queue"}
-          data-testid="composer-queue-toggle"
-          className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 text-left text-xs font-medium text-secondary-label outline-none transition-colors hover:text-foreground focus-visible:text-foreground"
-          onClick={() => setIsCollapsed((collapsed) => !collapsed)}
-        >
-          <ChevronDownIcon
-            className={cn(
-              "size-3 shrink-0 text-muted-foreground transition-transform",
-              !isCollapsed && "rotate-180",
-            )}
-            aria-hidden="true"
-          />
-          <span>Queue</span>
-          <span className="truncate font-normal text-muted-foreground">
-            · {items.length} message{items.length === 1 ? "" : "s"} waiting
-          </span>
-        </button>
-        <span className="shrink-0 text-[11px] text-muted-foreground/70">
-          {isInterrupted ? "Paused" : "Runs next"}
+      <div className="flex min-h-8 items-center gap-2 border-b border-border/40 px-3 text-xs text-muted-foreground">
+        <span className="flex-1">
+          {isInterrupted
+            ? "Queue paused because you interrupted"
+            : items.some((item) => item.pausedReason)
+              ? "Queue paused"
+              : "Runs next"}
         </span>
+        {isInterrupted ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="xs"
+            disabled={!onResumeInterruptedQueue}
+            onClick={() => void onResumeInterruptedQueue?.()}
+          >
+            <PlayIcon className="size-3" />
+            Resume
+          </Button>
+        ) : (
+          <span>{items.length} waiting</span>
+        )}
       </div>
-
-      {!isCollapsed ? (
-        <div className="vertical-scroll-fade-mask hide-scrollbar flex max-h-[30dvh] flex-col gap-px overflow-x-hidden overflow-y-auto [mask-image:linear-gradient(to_bottom,transparent,black_8px,black_calc(100%-8px),transparent)] [-webkit-mask-image:linear-gradient(to_bottom,transparent,black_8px,black_calc(100%-8px),transparent)] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          {isInterrupted ? (
-            <>
-              <div className="flex min-h-8 items-center gap-2 px-3 py-1.5 text-xs text-secondary-label">
-                <PlayIcon className="size-3 shrink-0 text-muted-foreground/70" aria-hidden="true" />
-                <span className="min-w-0 flex-1">Queue paused because you interrupted</span>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="xs"
-                  className="h-6 gap-1 px-1.5 text-xs text-secondary-label hover:text-foreground"
-                  disabled={!onResumeInterruptedQueue}
-                  onClick={onResumeInterruptedQueue}
-                >
-                  <PlayIcon className="size-3" aria-hidden="true" />
-                  Resume
-                </Button>
-              </div>
-              <div className="border-t border-border/55" aria-hidden="true" />
-            </>
-          ) : null}
-
-          <div ref={listRef} className="flex flex-col gap-px p-0.5">
-            <DndContext
-              sensors={sensors}
-              collisionDetection={closestCenter}
-              modifiers={[restrictToVerticalAxis, restrictToFirstScrollableAncestor]}
-              onDragEnd={handleDragEnd}
-            >
-              <SortableContext items={itemIds} strategy={verticalListSortingStrategy}>
-                {items.map((item) => (
-                  <QueueRow
-                    key={item.id}
-                    item={item}
-                    canReorder={items.length > 1 && onReorder !== undefined}
-                    isSendNowDisabled={isSendNowDisabled}
-                    isEditing={editingMessageId === item.id}
-                    isPaused={
-                      isMessagePaused
-                        ? isMessagePaused(item.pausedReason)
-                        : Boolean(item.pausedReason)
-                    }
-                    onSteer={onSteer}
-                    onRetry={onRetry}
-                    onCancel={onCancel}
-                    onEdit={onEdit}
-                    onEditMessage={onEditMessage}
-                    onOpenInSideChat={onOpenInSideChat}
-                    isQueueingEnabled={isQueueingEnabled}
-                    onQueueingChange={onQueueingChange}
-                  />
-                ))}
-              </SortableContext>
-            </DndContext>
-          </div>
-        </div>
-      ) : null}
-    </div>
+      <div className="max-h-[30dvh] overflow-y-auto">
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={reorder}>
+          <SortableContext
+            items={items.map((item) => item.id)}
+            strategy={verticalListSortingStrategy}
+          >
+            {items.map((item) => (
+              <QueueRow
+                key={item.id}
+                item={item}
+                canReorder={items.length > 1 && !!onReorder}
+                canSteer={canSteer}
+                onSteer={onSteer}
+                onCancel={onCancel}
+                onEdit={onEdit}
+                {...(onRetry ? { onRetry } : {})}
+              />
+            ))}
+          </SortableContext>
+        </DndContext>
+      </div>
+    </section>
   );
 }
